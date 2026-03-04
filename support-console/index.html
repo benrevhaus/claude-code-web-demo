@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CS Console · Ticket #4821</title>
+    <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "vue": "https://unpkg.com/vue@3.4/dist/vue.esm-browser.js"
+        }
+      }
+    </script>
+    <!-- Bump this number to bust all module caches in one place -->
+    <script>window.V = '3';</script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      const v = window.V;
+      const { default: App }         = await import(`./src/app.js?v=${v}`);
+    </script>
+  </body>
+</html>
