@@ -1,12 +1,25 @@
+import { computed } from 'vue';
+import { store } from '../store.js';
+
 export default {
   name: 'TicketHeader',
+
+  setup() {
+    const statusBadge = computed(() => ({
+      open:     { cls: 'badge-open',     label: 'Open'     },
+      snoozed:  { cls: 'badge-snoozed',  label: 'Snoozed'  },
+      resolved: { cls: 'badge-resolved', label: 'Resolved' },
+    }[store.ticketStatus]));
+
+    return { store, statusBadge };
+  },
 
   template: `
     <div class="ticket-header">
       <div class="ticket-header-left">
         <div class="ticket-id-row">
           <span class="ticket-id">#4821</span>
-          <span class="badge badge-open">Open</span>
+          <span class="badge" :class="statusBadge.cls">{{ statusBadge.label }}</span>
           <span class="badge badge-high">High Priority</span>
         </div>
         <h1 class="ticket-title">Cannot export reports to CSV</h1>
@@ -32,9 +45,21 @@ export default {
         </div>
       </div>
       <div class="ticket-header-right">
-        <button class="btn btn-ghost">Merge</button>
-        <button class="btn btn-ghost">Snooze</button>
-        <button class="btn btn-primary">Resolve</button>
+        <button class="btn btn-ghost" disabled>Merge</button>
+        <button
+          class="btn btn-ghost"
+          :class="{ 'btn-active': store.ticketStatus === 'snoozed' }"
+          @click="store.ticketStatus = store.ticketStatus === 'snoozed' ? 'open' : 'snoozed'"
+        >
+          {{ store.ticketStatus === 'snoozed' ? 'Unsnooze' : 'Snooze' }}
+        </button>
+        <button
+          class="btn"
+          :class="store.ticketStatus === 'resolved' ? 'btn-ghost' : 'btn-primary'"
+          @click="store.ticketStatus = store.ticketStatus === 'resolved' ? 'open' : 'resolved'"
+        >
+          {{ store.ticketStatus === 'resolved' ? 'Reopen' : 'Resolve' }}
+        </button>
       </div>
     </div>
   `,
