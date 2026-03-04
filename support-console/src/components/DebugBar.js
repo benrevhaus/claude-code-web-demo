@@ -1,9 +1,14 @@
+import { store, resetSandbox } from '../store.js';
+
 export default {
   name: 'DebugBar',
 
   props: {
-    panelIds:    { type: Array,  required: true },
-    currentRole: { type: String, required: true },
+    panelIds: { type: Array, required: true },
+  },
+
+  setup() {
+    return { store, resetSandbox };
   },
 
   template: `
@@ -15,7 +20,10 @@ export default {
           <span v-if="i < panelIds.length - 1" class="debug-arrow">→</span>
         </template>
       </div>
-      <span class="debug-source">src/layout.config.js · role: {{ currentRole }}</span>
+      <span class="debug-source">src/layout.config.js · role: {{ store.role }}</span>
+      <button class="btn-reset" @click="resetSandbox" title="Clear all localStorage and reset to defaults">
+        Reset sandbox
+      </button>
     </div>
   `,
 };

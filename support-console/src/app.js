@@ -1,5 +1,6 @@
-import { createApp, ref, computed } from 'vue';
+import { createApp, computed } from 'vue';
 import { PANEL_ORDER } from './layout.config.js';
+import { store } from './store.js';
 import NavBar from './components/NavBar.js';
 import TicketHeader from './components/TicketHeader.js';
 import PanelCustomerInfo from './components/PanelCustomerInfo.js';
@@ -11,20 +12,14 @@ const App = {
   components: { NavBar, TicketHeader, PanelCustomerInfo, PanelActivityFeed, PanelNotes, DebugBar },
 
   setup() {
-    const currentRole = ref('CS_AGENT');
     const roleOptions = Object.keys(PANEL_ORDER);
-    const panelIds = computed(() => PANEL_ORDER[currentRole.value]);
-
-    return { currentRole, roleOptions, panelIds };
+    const panelIds = computed(() => PANEL_ORDER[store.role]);
+    return { store, roleOptions, panelIds };
   },
 
   template: `
     <div class="console-root">
-      <NavBar
-        :currentRole="currentRole"
-        :roleOptions="roleOptions"
-        @role-change="currentRole = $event"
-      />
+      <NavBar :roleOptions="roleOptions" />
       <main class="main-content">
         <TicketHeader />
         <div class="panels-grid">
@@ -34,7 +29,7 @@ const App = {
             <PanelNotes         v-else-if="id === 'notes'" />
           </template>
         </div>
-        <DebugBar :panelIds="panelIds" :currentRole="currentRole" />
+        <DebugBar :panelIds="panelIds" />
       </main>
     </div>
   `,

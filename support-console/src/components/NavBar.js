@@ -1,12 +1,15 @@
+import { store } from '../store.js';
+
 export default {
   name: 'NavBar',
 
   props: {
-    currentRole: { type: String, required: true },
     roleOptions: { type: Array, required: true },
   },
 
-  emits: ['role-change'],
+  setup() {
+    return { store };
+  },
 
   template: `
     <nav class="nav">
@@ -27,8 +30,8 @@ export default {
       <div class="nav-right">
         <select
           class="role-select"
-          :value="currentRole"
-          @change="$emit('role-change', $event.target.value)"
+          :value="store.role"
+          @change="store.role = $event.target.value"
         >
           <option v-for="role in roleOptions" :key="role" :value="role">
             {{ role.replace('_', ' ') }}
