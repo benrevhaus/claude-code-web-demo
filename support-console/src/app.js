@@ -1,12 +1,26 @@
 import { createApp, computed } from 'vue';
-import { PANEL_ORDER } from './layout.config.js';
-import { store } from './store.js';
-import NavBar from './components/NavBar.js';
-import TicketHeader from './components/TicketHeader.js';
-import PanelCustomerInfo from './components/PanelCustomerInfo.js';
-import PanelActivityFeed from './components/PanelActivityFeed.js';
-import PanelNotes from './components/PanelNotes.js';
-import DebugBar from './components/DebugBar.js';
+
+const v = window.V;
+
+const [
+  { PANEL_ORDER },
+  { store },
+  { default: NavBar },
+  { default: TicketHeader },
+  { default: PanelCustomerInfo },
+  { default: PanelActivityFeed },
+  { default: PanelNotes },
+  { default: DebugBar },
+] = await Promise.all([
+  import(`./layout.config.js?v=${v}`),
+  import(`./store.js?v=${v}`),
+  import(`./components/NavBar.js?v=${v}`),
+  import(`./components/TicketHeader.js?v=${v}`),
+  import(`./components/PanelCustomerInfo.js?v=${v}`),
+  import(`./components/PanelActivityFeed.js?v=${v}`),
+  import(`./components/PanelNotes.js?v=${v}`),
+  import(`./components/DebugBar.js?v=${v}`),
+]);
 
 const App = {
   components: { NavBar, TicketHeader, PanelCustomerInfo, PanelActivityFeed, PanelNotes, DebugBar },
@@ -35,4 +49,4 @@ const App = {
   `,
 };
 
-createApp(App).mount('#app');
+export default createApp(App).mount('#app');

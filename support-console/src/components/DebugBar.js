@@ -1,4 +1,4 @@
-import { store, resetSandbox } from '../store.js';
+const { store, resetSandbox } = await import(`../store.js?v=${window.V}`);
 
 export default {
   name: 'DebugBar',

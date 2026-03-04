@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import { store } from '../store.js';
+const { store } = await import(`../store.js?v=${window.V}`);
 
 export default {
   name: 'PanelNotes',
