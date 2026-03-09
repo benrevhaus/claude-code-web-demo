@@ -8,6 +8,12 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      if (new URLSearchParams(location.search).get('key') !== 've123!') {
+        document.documentElement.style.display = 'none';
+        throw new Error('unauthorized');
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

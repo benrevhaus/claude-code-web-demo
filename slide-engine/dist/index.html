@@ -5,10 +5,16 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Slide Engine</title>
-    <script type="module" crossorigin src="./assets/index-DLLy3gJ9.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-Yx_AC-0_.css">
+    <script type="module" crossorigin src="./assets/index-D23mMG4D.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-TQ7n8kAR.css">
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      if (new URLSearchParams(location.search).get('key') !== 've123!') {
+        document.documentElement.style.display = 'none';
+        throw new Error('unauthorized');
+      }
+    </script>
   </body>
 </html>
