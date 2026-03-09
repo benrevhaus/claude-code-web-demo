@@ -290,6 +290,120 @@ const slides: Slide[] = [
     text: 'The key question changes from "How many people do we need?" to "How much value can each person create?"',
     notes: 'Close on this. It\'s a fundamental reframe of how the org thinks about hiring, growth, and performance.',
   },
+
+  // ── 22. Why Most Won't Do This ──────────────────────────────────────────────
+  {
+    type: 'bullet',
+    title: 'Why Most Companies Won\'t Do This',
+    subtitle: 'The technology already exists. The barrier is culture, not technology.',
+    points: [
+      'Most organizations still operate with rigid role boundaries',
+      'Knowledge is fragmented across people, threads, and undocumented systems',
+      'Without encoded knowledge, AI cannot operate effectively — it has nothing to work with',
+    ],
+    notes: 'This is the competitive moat argument in reverse. The companies that don\'t act will fall further behind, not just stay still.',
+  },
+
+  // ── 23. Section: Early Proof ────────────────────────────────────────────────
+  {
+    type: 'section',
+    title: 'Early Proof: Experiments Already Completed',
+    subtitle: 'This approach has already been validated internally.',
+    icon: '🧪',
+    notes: 'Pivot to evidence. Move from theory to demonstrated results.',
+  },
+
+  // ── 24. Experiment 1 ────────────────────────────────────────────────────────
+  {
+    type: 'bullet',
+    title: 'Experiment 1 — Tribal Knowledge Encoding',
+    subtitle: 'Encoding context directly into a repository, then testing AI\'s ability to work from it.',
+    points: [
+      'Encoded tribal knowledge directly into a code repository',
+      'Asked AI to fix a bug and build a new feature — using natural language only',
+      'It completed both tasks correctly',
+      'Proof: when systems contain context, AI can understand and extend them',
+    ],
+    notes: 'This is the simplest and most direct proof. Context in = capability out.',
+  },
+
+  // ── 25. Experiment 2 ────────────────────────────────────────────────────────
+  {
+    type: 'bullet',
+    title: 'Experiment 2 — Customer Chat Widget',
+    subtitle: 'From idea to MVP on staging in a single day.',
+    points: [
+      'Identified an opportunity to prevent third-party billing leakage',
+      'Idea → MVP deployed to staging: only a few hours',
+      'System was ready for QA the same day',
+      'Traditional workflow: the same work would take days or weeks',
+    ],
+    notes: 'Billing leakage is a high-value, concrete business problem. The timeline compression here is the story.',
+  },
+
+  // ── 26. Experiment 3 ────────────────────────────────────────────────────────
+  {
+    type: 'bullet',
+    title: 'Experiment 3 — Review System',
+    subtitle: 'A fully production-ready system built in a few days.',
+    points: [
+      'Built a fully functional review system with scalable architecture',
+      'Incorporated security best practices and maintainable code structure',
+      'Other engineers can safely extend and maintain it without starting over',
+    ],
+    notes: 'This one proves quality, not just speed. The output wasn\'t a prototype — it was real, extensible production code.',
+  },
+
+  // ── 27. Section: High-ROI Features ──────────────────────────────────────────
+  {
+    type: 'section',
+    title: 'Shipping High-ROI Features While Building the System',
+    subtitle: 'Immediate operational value in parallel with long-term infrastructure.',
+    icon: '🚀',
+    notes: 'Transition to the "what we would build" section. This bridges theory to roadmap.',
+  },
+
+  // ── 28. Marketing Opportunities ─────────────────────────────────────────────
+  {
+    type: 'bullet',
+    title: 'High-Leverage Area: Marketing',
+    subtitle: 'These improvements directly impact revenue growth.',
+    points: [
+      'Campaign automation — reduce manual work, increase testing surface',
+      'Attribution visibility — understand what is actually driving revenue',
+      'Experimentation tools — run more tests with less engineering overhead',
+      'Analytics systems — surface insights that currently require manual analysis',
+    ],
+    notes: 'Marketing is a high-leverage starting point because the ROI is measurable and fast.',
+  },
+
+  // ── 29. Customer Service Opportunities ──────────────────────────────────────
+  {
+    type: 'bullet',
+    title: 'High-Leverage Area: Customer Service',
+    subtitle: 'Improve customer experience while reducing operational workload.',
+    points: [
+      'AI support assistants — handle common queries without human intervention',
+      'Internal knowledge bots — give the team instant access to institutional knowledge',
+      'Automated issue triage — route problems to the right person faster',
+      'Customer self-service tools — empower customers to resolve issues independently',
+    ],
+    notes: 'Customer service is a strong second area — visible to customers and measurable in ticket volume and CSAT.',
+  },
+
+  // ── 30. Two Goals in Parallel ───────────────────────────────────────────────
+  {
+    type: 'bullet',
+    title: 'Shipping While Building the Garden',
+    subtitle: 'Two goals, pursued simultaneously.',
+    points: [
+      'Goal 1: Deliver high-impact features quickly — immediate operational value',
+      'Goal 2: Build the long-term knowledge ecosystem — compounding organizational intelligence',
+      'Every feature becomes another seed in the garden',
+      'Over time, these seeds compound into organizational intelligence that cannot be easily replicated',
+    ],
+    notes: 'This is the "no false choice" frame. We don\'t have to choose between moving fast and building well. The approach makes them the same thing.',
+  },
 ]
 
 export default slides
