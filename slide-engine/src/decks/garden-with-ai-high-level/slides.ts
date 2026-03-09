@@ -574,7 +574,60 @@ const slides: Slide[] = [
     notes: 'This is the closer. Don\'t just describe the model — point at it. The deck they just watched is proof the system works.',
   },
 
-  // ── 36. What We Could Build Next ────────────────────────────────────────────
+  // ── 36. Seed Architecture: WORKFLOW_TEMPLATE.md ─────────────────────────────
+  {
+    type: 'seed-doc',
+    title: 'What a Seed Actually Looks Like',
+    filename: 'WORKFLOW_TEMPLATE.md',
+    description: 'Every workflow in the system is encoded as a structured artifact — readable by humans and AI alike.',
+    groups: [
+      {
+        label: 'Identity',
+        color: 'blue',
+        sections: ['Workflow Metadata', 'Purpose', 'Trigger'],
+      },
+      {
+        label: 'Structure',
+        color: 'green',
+        sections: ['Actors', 'Inputs', 'Preconditions', 'Rules'],
+      },
+      {
+        label: 'Behavior',
+        color: 'purple',
+        sections: ['Decision Points', 'Actions', 'Exceptions / Escalations'],
+      },
+      {
+        label: 'Outputs & Dependencies',
+        color: 'amber',
+        sections: ['Outputs', 'Data Dependencies'],
+      },
+      {
+        label: 'Interface & Automation',
+        color: 'cyan',
+        sections: ['Interface Trigger', 'Automation Function'],
+      },
+      {
+        label: 'Governance & Learning',
+        color: 'rose',
+        sections: ['Logging / Audit', 'Tutorial Intent', 'Design Notes', 'Technical Constraints'],
+      },
+      {
+        label: 'Grounding',
+        color: 'indigo',
+        sections: ['Example Instance'],
+      },
+    ],
+    highlight: [
+      'Read this artifact before generating code.',
+      'Preserve workflow intent.',
+      'Never place business logic solely in the interface layer.',
+      'Use the automation function as the execution boundary.',
+      'Update related docs and registry entries when modifying workflows.',
+    ],
+    notes: 'This is the answer to "what does a seed look like?" Every workflow is encoded as this artifact. AI reads the contract before writing a line of code. Humans can read it too — that\'s the point. The schema is the shared language.',
+  },
+
+  // ── 37. What We Could Build Next ────────────────────────────────────────────
   {
     type: 'icon-card',
     title: 'Other Ideas Already in View',

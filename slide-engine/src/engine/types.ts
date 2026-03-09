@@ -10,6 +10,7 @@ export type SlideType =
   | 'icon-card'
   | 'quote'
   | 'timeline'
+  | 'seed-doc'
 
 // ─── Per-Type Prop Interfaces ─────────────────────────────────────────────────
 
@@ -103,6 +104,22 @@ export interface TimelineSlideProps {
   notes?: string
 }
 
+export interface SeedDocGroup {
+  label: string
+  color?: string
+  sections: string[]
+}
+
+export interface SeedDocSlideProps {
+  type: 'seed-doc'
+  title?: string
+  filename: string
+  description?: string
+  groups: SeedDocGroup[]
+  highlight?: string[]
+  notes?: string
+}
+
 // ─── Discriminated Union ──────────────────────────────────────────────────────
 
 export type Slide =
@@ -115,6 +132,7 @@ export type Slide =
   | IconCardSlideProps
   | QuoteSlideProps
   | TimelineSlideProps
+  | SeedDocSlideProps
 
 // ─── Theme Tokens ─────────────────────────────────────────────────────────────
 

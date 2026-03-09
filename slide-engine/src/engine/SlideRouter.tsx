@@ -18,6 +18,7 @@ import ProofPointSlide from '../layouts/ProofPointSlide'
 import IconCardSlide from '../layouts/IconCardSlide'
 import QuoteSlide from '../layouts/QuoteSlide'
 import TimelineSlide from '../layouts/TimelineSlide'
+import SeedDocSlide from '../layouts/SeedDocSlide'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const LAYOUT_MAP: Record<SlideType, ComponentType<any>> = {
@@ -30,6 +31,7 @@ const LAYOUT_MAP: Record<SlideType, ComponentType<any>> = {
   'icon-card': IconCardSlide,
   quote: QuoteSlide,
   timeline: TimelineSlide,
+  'seed-doc': SeedDocSlide,
 }
 
 interface SlideRouterProps {
