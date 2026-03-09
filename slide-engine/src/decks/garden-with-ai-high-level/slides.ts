@@ -685,7 +685,35 @@ const slides: Slide[] = [
     notes: 'Use this slide to show that the approach is not isolated thinking — enterprise practitioners are arriving at the same conclusions independently. The meta-point: this slide was added during the podcast, minutes before this meeting. That\'s the system working in real time.',
   },
 
-  // ── 39. What We Could Build Next ────────────────────────────────────────────
+  // ── 39. The Creativity Gap & Governance ─────────────────────────────────────
+  {
+    type: 'comparison',
+    title: 'The Creativity Gap — and Why Governance Isn\'t Optional',
+    left: {
+      heading: 'The Opportunity: Close the Creativity Gap',
+      points: [
+        'Most people have ideas they can\'t build — the gap between imagination and execution is an engineering bottleneck',
+        'AI closes this gap. Non-engineers can now prototype, test, and ship',
+        'Celebrate small wins. The first time someone outside engineering ships a working tool is a cultural milestone worth marking',
+        'Each win builds confidence, literacy, and appetite for the next one',
+        'This is how AI adoption actually takes root — not top-down mandates, but bottom-up momentum',
+      ],
+    },
+    right: {
+      heading: 'The Risk: Ungoverned Creativity Becomes Sprawl',
+      points: [
+        'Without structure, prototypes become production systems no one owns',
+        'Duplicate tools get built because nobody knew the first one existed',
+        'Business logic lives in prompts, not seeds — invisible and unauditable',
+        'Costs accumulate silently across subscriptions, tokens, and API calls',
+        'The garden becomes a jungle. Fast to grow, impossible to maintain',
+        'Governance isn\'t bureaucracy — it\'s the schema that makes creativity composable',
+      ],
+    },
+    notes: 'This is the maturity slide. You want the creativity. You want the small wins. But each win needs to land as a seed, not a one-off. The workflow template is what converts a clever prototype into a permanent organizational asset. Without it, you\'re gardening without beds — everything grows, nothing is findable.',
+  },
+
+  // ── 40. What We Could Build Next ────────────────────────────────────────────
   {
     type: 'icon-card',
     title: 'Other Ideas Already in View',
