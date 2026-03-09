@@ -33,15 +33,29 @@ const slides: Slide[] = [
 
   // ── 4. The Opportunity ──────────────────────────────────────────────────────
   {
-    type: 'bullet',
+    type: 'comparison',
     title: 'The Opportunity',
-    subtitle: 'AI is becoming capable enough to fundamentally change how organizations operate.',
-    points: [
-      'Most companies will adopt AI as a productivity tool — this is the shallow play',
-      'The deeper opportunity: redesign how the company captures knowledge, builds systems, and distributes capability',
-      'Instead of AI sitting on top of the org, embed AI into the operating environment itself',
-    ],
-    notes: 'The key contrast is "AI as tool" vs. "AI as operating environment." Pause on the third bullet — this is the thesis.',
+    left: {
+      heading: 'The Shallow Play',
+      points: [
+        'Adopt AI as a productivity tool',
+        'Layer it on top of existing org structure',
+        'Incremental gains in individual output',
+        'AI cannot do much without context',
+        'Most companies will stop here',
+      ],
+    },
+    right: {
+      heading: 'The Deeper Opportunity',
+      points: [
+        'Redesign how the company captures knowledge',
+        'Embed AI into the operating environment itself',
+        'Structural gains in organizational capability',
+        'AI becomes dramatically more useful with rich context',
+        'Very few companies will get here',
+      ],
+    },
+    notes: 'The key contrast is "AI as tool" vs. "AI as operating environment." Pause on the right column — this is the thesis.',
   },
 
   // ── 5. The Key Idea ─────────────────────────────────────────────────────────
@@ -82,15 +96,16 @@ const slides: Slide[] = [
 
   // ── 8. The Strategic Advantage ──────────────────────────────────────────────
   {
-    type: 'bullet',
+    type: 'icon-card',
     title: 'The Strategic Advantage',
     subtitle: 'Competitors can copy features. They cannot easily copy years of encoded organizational knowledge.',
-    points: [
-      'Onboarding becomes faster — new hires inherit context immediately',
-      'Iteration cycles become faster — less rediscovery, more building',
-      'AI agents become dramatically more useful — they have rich context to work with',
-      'Systems become self-explanatory — anyone can understand and extend them',
+    cards: [
+      { icon: '🚀', label: 'Faster Onboarding', description: 'New hires inherit context immediately — no months of tribal knowledge transfer' },
+      { icon: '⚡', label: 'Faster Iteration', description: 'Less rediscovery, more building — teams spend time creating, not re-learning' },
+      { icon: '🤖', label: 'More Capable AI', description: 'AI agents become dramatically more useful when they have rich context to work with' },
+      { icon: '🔍', label: 'Self-Explanatory Systems', description: 'Anyone can understand and extend them — the system explains itself' },
     ],
+    columns: 2,
     notes: 'This is the moat argument. Features are commodities. Encoded organizational intelligence is not.',
   },
 
@@ -105,17 +120,18 @@ const slides: Slide[] = [
 
   // ── 10. Garden Overview ─────────────────────────────────────────────────────
   {
-    type: 'bullet',
+    type: 'icon-card',
     title: 'What Healthy Gardens Require',
     subtitle: 'Organizations work the same way.',
-    points: [
-      'Good soil — the culture and environment that enables growth',
-      'Careful planting — deliberate decisions about what to build',
-      'Irrigation systems — tools and processes that ensure consistent delivery',
-      'Pollination — spreading value to customers and the market',
-      'Pruning — removing waste and complexity intentionally',
-      'Resilience to storms — the ability to withstand disruption',
+    cards: [
+      { icon: '🌍', label: 'Good Soil', description: 'Culture and environment — the foundation that enables everything else to grow' },
+      { icon: '🌱', label: 'Careful Planting', description: 'Deliberate decisions about what to build, what problems to solve, where to invest' },
+      { icon: '💧', label: 'Irrigation Systems', description: 'Tools, workflows, and automation that ensure consistent delivery regardless of conditions' },
+      { icon: '🦋', label: 'Pollination', description: 'Spreading value to customers and the market — even great gardens need pollinators' },
+      { icon: '✂️', label: 'Pruning', description: 'Removing waste and complexity intentionally — healthy growth requires it' },
+      { icon: '🌪️', label: 'Resilience to Storms', description: 'The ability to withstand disruption — designed in, not hoped for' },
     ],
+    columns: 3,
     notes: 'Use this as a map for what follows. Each element becomes a section of the model.',
   },
 
@@ -156,30 +172,36 @@ const slides: Slide[] = [
 
   // ── 12. Irrigation Systems ──────────────────────────────────────────────────
   {
-    type: 'bullet',
+    type: 'comparison',
     title: 'Irrigation Systems',
-    subtitle: 'Healthy gardens do not depend on rain.',
-    points: [
-      'Rain = luck, market timing, external opportunity — unpredictable and unreliable',
-      'Irrigation = tools, workflows, automation, knowledge systems, internal infrastructure',
-      'Irrigation systems ensure consistent growth regardless of external conditions',
-      'Balance matters: too much irrigation → bureaucracy. Too little → chaos.',
-    ],
+    left: {
+      heading: 'Rain',
+      points: [
+        'Luck and market timing',
+        'External opportunity',
+        'Unpredictable and unreliable',
+        'Cannot be planned around',
+        'Most companies depend on this',
+      ],
+    },
+    right: {
+      heading: 'Irrigation',
+      points: [
+        'Tools, workflows, and automation',
+        'Knowledge systems and internal infrastructure',
+        'Consistent growth regardless of conditions',
+        'Built before drought, not during it',
+        'This is what separates resilient orgs',
+      ],
+    },
     notes: 'The irrigation metaphor is the argument against "we\'ll figure it out when we need it." You build the pipes before drought.',
   },
 
   // ── 13. Storms ──────────────────────────────────────────────────────────────
   {
-    type: 'bullet',
-    title: 'Storms Are Unavoidable',
-    subtitle: 'Organizations cannot stop storms. But they can build resilience.',
-    points: [
-      'Economic uncertainty',
-      'Global events',
-      'Technology disruption',
-      'Supply chain changes',
-    ],
-    notes: 'Keep this brief. The point isn\'t to catalog threats — it\'s that resilience is designed, not hoped for.',
+    type: 'quote',
+    text: 'Organizations cannot stop storms. But they can build resilience — and that is entirely a design choice.',
+    notes: 'Keep this brief. Economic uncertainty, global events, technology disruption, supply chain shifts — all unavoidable. Resilience is the only variable.',
   },
 
   // ── 14. Section: Where AI Fits ──────────────────────────────────────────────
@@ -218,14 +240,30 @@ const slides: Slide[] = [
 
   // ── 16. Democratizing Creation ──────────────────────────────────────────────
   {
-    type: 'bullet',
+    type: 'comparison',
     title: 'Democratizing Creation',
-    subtitle: 'AI enables a new model for how features get built.',
-    points: [
-      'Traditional path: Idea → Spec → Engineering → Testing → Documentation → Deployment (weeks or months)',
-      'New model: anyone in the org can express ideas, prototype tools, generate systems, and document reasoning',
-      'Creation becomes distributed across the entire organization',
-    ],
+    left: {
+      heading: 'Traditional Path',
+      points: [
+        'Idea surfaces somewhere in the org',
+        'Spec written, prioritized, scheduled',
+        'Engineering builds it',
+        'QA, documentation, deployment',
+        'Weeks or months later: shipped',
+        'Creation bottlenecked by engineering capacity',
+      ],
+    },
+    right: {
+      heading: 'New Model',
+      points: [
+        'Anyone in the org can express an idea',
+        'Prototype a tool in natural language',
+        'Generate a system with AI assistance',
+        'Document the reasoning as you go',
+        'Same day or same week: shipped',
+        'Bottleneck shifts to idea quality, not capacity',
+      ],
+    },
     notes: 'This is the "10x leverage" argument. The bottleneck shifts from engineering capacity to idea quality.',
   },
 
@@ -272,15 +310,30 @@ const slides: Slide[] = [
 
   // ── 20. Scaling Value ───────────────────────────────────────────────────────
   {
-    type: 'bullet',
+    type: 'comparison',
     title: 'Scaling Value Without Scaling Headcount',
-    subtitle: 'Traditional scaling vs. AI-enabled scaling.',
-    points: [
-      'Traditional: more products → more engineers. More customers → more support. More systems → more operators.',
-      'This leads to coordination overhead, slower decisions, and increasing complexity',
-      'AI model: each employee gains AI assistants, researchers, builders, and analysts',
-      'The organization becomes a hybrid workforce of humans and AI',
-    ],
+    left: {
+      heading: 'Traditional Scaling',
+      points: [
+        'More products → more engineers',
+        'More customers → more support staff',
+        'More systems → more operators',
+        'Coordination overhead grows with headcount',
+        'Decisions slow down as the org gets larger',
+        'Complexity becomes the product',
+      ],
+    },
+    right: {
+      heading: 'AI-Enabled Scaling',
+      points: [
+        'Each employee gains AI assistants',
+        'Each employee gains AI researchers',
+        'Each employee gains AI builders and analysts',
+        'The org becomes a hybrid human-AI workforce',
+        'Decisions stay fast because context is encoded',
+        'Intelligence compounds, complexity does not',
+      ],
+    },
     notes: 'This is the core economic argument. Linear headcount scaling is a liability model. This is a leverage model.',
   },
 
@@ -315,42 +368,34 @@ const slides: Slide[] = [
 
   // ── 24. Experiment 1 ────────────────────────────────────────────────────────
   {
-    type: 'bullet',
+    type: 'proof-point',
     title: 'Experiment 1 — Tribal Knowledge Encoding',
-    subtitle: 'Encoding context directly into a repository, then testing AI\'s ability to work from it.',
-    points: [
-      'Encoded tribal knowledge directly into a code repository',
-      'Asked AI to fix a bug and build a new feature — using natural language only',
-      'It completed both tasks correctly',
-      'Proof: when systems contain context, AI can understand and extend them',
-    ],
+    metric: 'Bug fixed. Feature shipped.',
+    metricLabel: 'Natural language only — zero code written by hand',
+    narrative: 'Encoded tribal knowledge directly into a code repository. Asked AI to fix a bug and build a new feature using only natural language instructions. It completed both tasks correctly.',
+    comparison: 'vs. days of onboarding a new engineer to the same codebase',
     notes: 'This is the simplest and most direct proof. Context in = capability out.',
   },
 
   // ── 25. Experiment 2 ────────────────────────────────────────────────────────
   {
-    type: 'bullet',
+    type: 'proof-point',
     title: 'Experiment 2 — Customer Chat Widget',
-    subtitle: 'From idea to MVP on staging in a single day.',
-    points: [
-      'Identified an opportunity to prevent third-party billing leakage',
-      'Idea → MVP deployed to staging: only a few hours',
-      'System was ready for QA the same day',
-      'Traditional workflow: the same work would take days or weeks',
-    ],
+    metric: 'A few hours',
+    metricLabel: 'Idea to MVP deployed on staging — same day',
+    narrative: 'Identified an opportunity to prevent third-party billing leakage. From the moment the idea was conceived to a working MVP on staging, only a few hours passed. The system was ready for QA the same day.',
+    comparison: 'vs. days or weeks on the traditional engineering workflow',
     notes: 'Billing leakage is a high-value, concrete business problem. The timeline compression here is the story.',
   },
 
   // ── 26. Experiment 3 ────────────────────────────────────────────────────────
   {
-    type: 'bullet',
+    type: 'proof-point',
     title: 'Experiment 3 — Review System',
-    subtitle: 'A fully production-ready system built in a few days.',
-    points: [
-      'Built a fully functional review system with scalable architecture',
-      'Incorporated security best practices and maintainable code structure',
-      'Other engineers can safely extend and maintain it without starting over',
-    ],
+    metric: 'Production-ready',
+    metricLabel: 'Scalable architecture, security best practices, fully extensible — in days',
+    narrative: 'Built a fully functional review system in a matter of days. It incorporated security best practices and a maintainable code structure. Other engineers can safely extend it without starting over.',
+    comparison: 'vs. weeks — and the output is indistinguishable from senior engineering work',
     notes: 'This one proves quality, not just speed. The output wasn\'t a prototype — it was real, extensible production code.',
   },
 
@@ -393,15 +438,28 @@ const slides: Slide[] = [
 
   // ── 30. Two Goals in Parallel ───────────────────────────────────────────────
   {
-    type: 'bullet',
+    type: 'comparison',
     title: 'Shipping While Building the Garden',
-    subtitle: 'Two goals, pursued simultaneously.',
-    points: [
-      'Goal 1: Deliver high-impact features quickly — immediate operational value',
-      'Goal 2: Build the long-term knowledge ecosystem — compounding organizational intelligence',
-      'Every feature becomes another seed in the garden',
-      'Over time, these seeds compound into organizational intelligence that cannot be easily replicated',
-    ],
+    left: {
+      heading: 'Goal 1: Ship Now',
+      points: [
+        'Deliver high-impact features immediately',
+        'Measurable operational value from week one',
+        'Each feature proves the model in practice',
+        'Fast wins build organizational confidence',
+        'The business moves forward while the system is built',
+      ],
+    },
+    right: {
+      heading: 'Goal 2: Build the Garden',
+      points: [
+        'Every feature becomes a knowledge seed',
+        'Seeds compound into organizational intelligence',
+        'The system becomes harder to replicate over time',
+        'AI becomes more capable as context accumulates',
+        'Long-term advantage grows with every sprint',
+      ],
+    },
     notes: 'This is the "no false choice" frame. We don\'t have to choose between moving fast and building well. The approach makes them the same thing.',
   },
 
@@ -507,15 +565,12 @@ const slides: Slide[] = [
 
   // ── 35. Meta Proof ──────────────────────────────────────────────────────────
   {
-    type: 'bullet',
-    title: 'Meta Proof',
-    subtitle: 'This presentation is itself a demonstration of the model.',
-    points: [
-      'This slide deck was produced using a seed engine for presentations — conceived, written, and deployed in under an hour',
-      'Written entirely on a phone, walking back and forth in a room for exercise',
-      'The engine is robust enough to generate slides for anyone — governance docs can be edited in natural language',
-      'The seed encoded its own intent, structure, and reasoning — ready to extend',
-    ],
+    type: 'proof-point',
+    title: 'Meta Proof: This Deck Is a Seed',
+    metric: '< 1 hour',
+    metricLabel: 'Conceived, written, and deployed — on a phone, walking laps in a room',
+    narrative: 'This slide deck was produced using the same seed engine it describes. The engine is robust enough to generate slides for anyone. The governance documents can be edited in natural language. The seed encoded its own intent, structure, and reasoning — ready to extend.',
+    comparison: 'vs. the hours or days a typical executive deck requires',
     notes: 'This is the closer. Don\'t just describe the model — point at it. The deck they just watched is proof the system works.',
   },
 
