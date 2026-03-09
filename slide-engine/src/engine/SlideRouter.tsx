@@ -83,21 +83,42 @@ export default function SlideRouter({ deck, onExit }: SlideRouterProps) {
       style={{ background: 'var(--color-bg, #0a0a0f)' }}
       onClick={goNext}
     >
-      {/* Slide strip toggle */}
-      <button
-        className="fixed top-3 left-3 z-50 w-8 h-8 rounded-lg flex items-center justify-center transition-opacity opacity-0 hover:opacity-100"
+      {/* Top nav bar */}
+      <div
+        className="fixed top-0 left-0 right-0 z-50 flex items-center gap-1 px-3 overflow-x-auto"
         style={{
-          background: 'rgba(255,255,255,0.08)',
-          color: 'var(--color-muted)',
+          height: '36px',
+          background: 'rgba(10,10,15,0.85)',
+          backdropFilter: 'blur(10px)',
+          borderBottom: '1px solid var(--color-border, #2a2a3e)',
+          scrollbarWidth: 'none',
         }}
-        onClick={(e) => {
-          e.stopPropagation()
-          setShowNav((s) => !s)
-        }}
-        title="Toggle slide panel"
+        onClick={(e) => e.stopPropagation()}
       >
-        ☰
-      </button>
+        {deck.slides.map((slide, i) => {
+          const isActive = i === current
+          const label = 'title' in slide && slide.title ? slide.title : `Slide ${i + 1}`
+          return (
+            <button
+              key={i}
+              onClick={() => goToSlide(i)}
+              title={label}
+              className="flex-shrink-0 rounded flex items-center justify-center tabular-nums transition-colors"
+              style={{
+                minWidth: '28px',
+                height: '22px',
+                fontSize: '0.65rem',
+                fontWeight: isActive ? 700 : 400,
+                background: isActive ? 'var(--color-accent, #6366f1)' : 'transparent',
+                color: isActive ? '#fff' : 'var(--color-muted, #9ca3af)',
+                border: isActive ? 'none' : '1px solid transparent',
+              }}
+            >
+              {i + 1}
+            </button>
+          )
+        })}
+      </div>
 
       {/* Slide frame */}
       <div className="slide-frame">
