@@ -404,6 +404,150 @@ const slides: Slide[] = [
     ],
     notes: 'This is the "no false choice" frame. We don\'t have to choose between moving fast and building well. The approach makes them the same thing.',
   },
+
+  // ── 31. What Happens If We Do Nothing ───────────────────────────────────────
+  {
+    type: 'bullet',
+    title: 'What Happens If We Do Nothing',
+    subtitle: 'Traditional scaling leads to a predictable outcome.',
+    points: [
+      'Headcount grows — and with it, coordination costs',
+      'Knowledge fragments — every departure takes context with it',
+      'Innovation slows — teams spend more time managing than creating',
+      'Eventually: more time managing complexity than creating value',
+    ],
+    notes: 'This is the status quo trap. Not a crisis — a slow drain. The cost is hard to see until it\'s very large.',
+  },
+
+  // ── 32. The Choice ──────────────────────────────────────────────────────────
+  {
+    type: 'comparison',
+    title: 'The Choice',
+    left: {
+      heading: 'Traditional Scaling',
+      points: [
+        'Grow larger',
+        'Add headcount to add capacity',
+        'Knowledge lives in people',
+        'AI as a productivity tool on top',
+        'Complexity grows with the org',
+      ],
+    },
+    right: {
+      heading: 'Knowledge-Driven Scaling',
+      points: [
+        'Grow smarter',
+        'Add capability per person',
+        'Knowledge encoded into the system',
+        'AI embedded in the operating environment',
+        'Intelligence compounds year over year',
+      ],
+    },
+    notes: 'Let this sit. The left column is the default path — comfortable and familiar. The right column requires intentional design.',
+  },
+
+  // ── 33. Visual Model ────────────────────────────────────────────────────────
+  {
+    type: 'diagram',
+    title: 'The AI Garden Organization',
+    layers: [
+      {
+        icon: '🌞',
+        label: 'Market & Customers',
+        description: 'The environment the garden grows toward',
+        color: 'amber',
+      },
+      {
+        icon: '🦋',
+        label: 'Pollinators — Marketing & Growth',
+        description: 'Spread value from the garden to the market',
+        color: 'purple',
+      },
+      {
+        icon: '🌿',
+        label: 'Products & Features',
+        description: 'Gardeners (Product) · Workers (Engineering) · AI Assistant Workers',
+        color: 'green',
+      },
+      {
+        icon: '🌱',
+        label: 'Knowledge-Encoded Seeds',
+        description: 'Code + Context + Documentation + Intent',
+        color: 'emerald',
+      },
+      {
+        icon: '💧',
+        label: 'Irrigation Systems',
+        description: 'Tools · Processes · AI Agents · Automation',
+        color: 'blue',
+      },
+      {
+        icon: '🧠',
+        label: 'Technology Ecosystem Map',
+        description: 'Documented tools, systems, integrations, costs, ownership, usage',
+        color: 'indigo',
+      },
+      {
+        icon: '🌍',
+        label: 'Soil — Culture',
+        description: 'Learning · Documentation · Trust · Knowledge Sharing · Experimentation',
+        color: 'stone',
+      },
+    ],
+    notes: 'Walk bottom-up. Culture is the foundation. Seeds are planted into it. Irrigation feeds them. Products grow. Pollinators spread. Market receives.',
+  },
+
+  // ── 34. Final Thought ────────────────────────────────────────────────────────
+  {
+    type: 'hero',
+    title: 'Great companies don\'t just build products.',
+    subtitle: 'They build systems that allow innovation to compound.',
+    notes: 'Open with this, then deliver the rest verbally: "If we start planting seeds today, we won\'t just move faster — we\'ll build an organization that gets smarter every year it exists."',
+  },
+
+  // ── 35. Meta Proof ──────────────────────────────────────────────────────────
+  {
+    type: 'bullet',
+    title: 'Meta Proof',
+    subtitle: 'This presentation is itself a demonstration of the model.',
+    points: [
+      'This slide deck was produced using a seed engine for presentations — conceived, written, and deployed in under an hour',
+      'Written entirely on a phone, walking back and forth in a room for exercise',
+      'The engine is robust enough to generate slides for anyone — governance docs can be edited in natural language',
+      'The seed encoded its own intent, structure, and reasoning — ready to extend',
+    ],
+    notes: 'This is the closer. Don\'t just describe the model — point at it. The deck they just watched is proof the system works.',
+  },
+
+  // ── 36. What We Could Build Next ────────────────────────────────────────────
+  {
+    type: 'icon-card',
+    title: 'Other Ideas Already in View',
+    cards: [
+      {
+        icon: '📅',
+        label: 'Promo Calendar Optimizer',
+        description: 'Runs locally with a local LLM — no data leakage. Real data in, optimized projections out.',
+      },
+      {
+        icon: '📊',
+        label: 'KPI Number Cruncher',
+        description: 'Local automation + queryable local LLM. Founder-level insight without exposing sensitive data externally.',
+      },
+      {
+        icon: '🔒',
+        label: 'Secure Knowledge Retrieval',
+        description: 'Sensitive tribal knowledge stored behind AWS IAM — accessible to AI, not exposed in GitHub.',
+      },
+      {
+        icon: '🖥️',
+        label: 'Air-Gapped Local LLM Lab',
+        description: 'Mac mini with zero internet access. Freely experiment with local models on real, sensitive data.',
+      },
+    ],
+    columns: 2,
+    notes: 'These are early-stage ideas. The point is that the model generates more ideas naturally — once seeds exist, next seeds come faster.',
+  },
 ]
 
 export default slides
