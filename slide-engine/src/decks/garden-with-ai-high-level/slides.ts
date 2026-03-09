@@ -713,7 +713,22 @@ const slides: Slide[] = [
     notes: 'This is the maturity slide. You want the creativity. You want the small wins. But each win needs to land as a seed, not a one-off. The workflow template is what converts a clever prototype into a permanent organizational asset. Without it, you\'re gardening without beds — everything grows, nothing is findable.',
   },
 
-  // ── 40. What We Could Build Next ────────────────────────────────────────────
+  // ── 40. Real-Time Knowledge Capture as a Standard ───────────────────────────
+  {
+    type: 'bullet',
+    title: 'This Should Be a New Organizational Standard',
+    subtitle: 'The fact that these slides were built in real time — while listening to a podcast, during a meeting — is not a trick. It\'s a repeatable practice that every department should eventually own.',
+    points: [
+      'Every meeting, conference, podcast, or debrief produces insights that currently disappear. The standard should be: if something is worth listening to, it\'s worth capturing as a seed.',
+      'Real-time capture closes the gap between insight and artifact. The knowledge doesn\'t have to be reconstructed from memory later — it\'s already structured when it\'s still fresh.',
+      'This scales across departments. Marketing captures campaign learnings. Customer service captures resolution patterns. Leadership captures strategic decisions. Each department builds its own queryable knowledge base.',
+      'Queryable safely: a local LLM with internet off means sensitive internal knowledge never leaves the building. The org can ask questions of its own institutional memory without exposure.',
+      'Over time, the organization\'s knowledge base becomes its most durable competitive asset — not its people\'s memories, not its Slack history, but a structured, searchable, AI-readable archive that compounds every year.',
+    ],
+    notes: 'This is the long-game vision slide. The podcast example from slide 38 and the live additions today aren\'t anecdotes — they\'re demonstrations of a practice. The question isn\'t whether this is possible. It\'s whether the org decides to make it standard. Frame it as a culture decision, not a technology decision.',
+  },
+
+  // ── 41. What We Could Build Next ────────────────────────────────────────────
   {
     type: 'icon-card',
     title: 'Other Ideas Already in View',
