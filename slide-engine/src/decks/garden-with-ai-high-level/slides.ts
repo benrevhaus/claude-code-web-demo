@@ -627,7 +627,51 @@ const slides: Slide[] = [
     notes: 'This is the answer to "what does a seed look like?" Every workflow is encoded as this artifact. AI reads the contract before writing a line of code. Humans can read it too — that\'s the point. The schema is the shared language.',
   },
 
-  // ── 37. What We Could Build Next ────────────────────────────────────────────
+  // ── 37. The Build Flow ───────────────────────────────────────────────────────
+  {
+    type: 'timeline',
+    title: 'From Idea to Launch: The AI-Assisted Build Flow',
+    items: [
+      {
+        icon: '🌱',
+        label: 'Ideation → Seed Artifact',
+        description: 'Custom GPT converts raw idea into a structured WORKFLOW_TEMPLATE.md. Guardrailed: business rules, intent, and constraints encoded before any code is written.',
+      },
+      {
+        icon: '🖥️',
+        label: 'Natural Language Prototype',
+        description: 'Local Claude on a Vite/React scaffold turns the seed into a working mockup using natural language only. Guardrailed: AI reads the seed contract — no rogue logic.',
+      },
+      {
+        icon: '🔧',
+        label: 'Engineering Feasibility Review',
+        description: 'Engineers review the prototype and seed for technical constraints, integration points, and architectural fit. Go / revise decision made here.',
+      },
+      {
+        icon: '🎨',
+        label: 'Design Handoff',
+        description: 'Design fleshes out the UX using the prototype as a reference. Visual language, accessibility, edge cases resolved. Seed updated with design notes.',
+      },
+      {
+        icon: '⚙️',
+        label: 'Engineering Integration',
+        description: 'Engineers build from the approved design, referencing the seed for business logic boundaries. AI assists with implementation, not architecture.',
+      },
+      {
+        icon: '🧪',
+        label: 'Staging MVP → QA',
+        description: 'Working build deployed to staging. QA validates against the seed\'s acceptance criteria and example instance. Issues resolved before production.',
+      },
+      {
+        icon: '🚀',
+        label: 'Launch',
+        description: 'Deployed to production. Seed archived as a permanent knowledge artifact — ready to extend, explain, or hand off to any new team member or AI agent.',
+      },
+    ],
+    notes: 'Walk through each stage. The critical point: the seed travels the entire flow. It starts at ideation and ends archived in production. Every handoff references the same artifact — no context lost between steps.',
+  },
+
+  // ── 38. What We Could Build Next ────────────────────────────────────────────
   {
     type: 'icon-card',
     title: 'Other Ideas Already in View',
