@@ -671,7 +671,21 @@ const slides: Slide[] = [
     notes: 'Walk through each stage. The critical point: the seed travels the entire flow. It starts at ideation and ends archived in production. Every handoff references the same artifact — no context lost between steps.',
   },
 
-  // ── 38. What We Could Build Next ────────────────────────────────────────────
+  // ── 38. External Validation: Podcast Alignment ──────────────────────────────
+  {
+    type: 'bullet',
+    title: 'Independent Validation — Added Live Before This Meeting',
+    subtitle: 'Podcast: "How to Make AI Work for Your Brand With Two Enterprise Insiders" — listened to it this morning. Their thesis maps directly onto this deck.',
+    points: [
+      'Democratize AI tools to individuals — not just IT or engineering. Every person in the org should have access, not just specialists.',
+      'Employees must learn AI. Literacy is not optional — it\'s the new baseline competency for knowledge workers.',
+      'Culture has to foster it. Without psychological safety to experiment, tools go unused and the org falls behind regardless of what it buys.',
+      'The Garden Model is the operational answer to all three: seeds make AI accessible to non-engineers, the workflow embeds learning into the process, and encoding knowledge openly builds the culture of sharing.',
+    ],
+    notes: 'Use this slide to show that the approach is not isolated thinking — enterprise practitioners are arriving at the same conclusions independently. The meta-point: this slide was added during the podcast, minutes before this meeting. That\'s the system working in real time.',
+  },
+
+  // ── 39. What We Could Build Next ────────────────────────────────────────────
   {
     type: 'icon-card',
     title: 'Other Ideas Already in View',
