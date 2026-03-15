@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && sed -i 's/<script type=\"module\" crossorigin>/<script>/' dist/index.html",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -29,6 +29,7 @@
     "tailwindcss": "^4.2.1",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.56.1",
-    "vite": "^8.0.0"
+    "vite": "^8.0.0",
+    "vite-plugin-singlefile": "^2.3.0"
   }
 }
