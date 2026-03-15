@@ -85,4 +85,4 @@ If this repository is lost or needs to be recreated:
 ---
 ## Change Log
 - V0 — initial scaffold
-- V__ — [describe change in 1 sentence]
+- V1 — CTO Vision slide deck: 16-slide AI-Native Operational Advantage presentation
