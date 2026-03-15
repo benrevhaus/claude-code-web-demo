@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && sed -i 's/<script type=\"module\" crossorigin>/<script>/' dist/index.html",
+    "build": "tsc -b && vite build && node scripts/fix-dist.js",
     "lint": "eslint .",
     "preview": "vite preview"
   },
