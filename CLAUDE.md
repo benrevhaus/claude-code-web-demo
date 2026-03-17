@@ -86,3 +86,4 @@ If this repository is lost or needs to be recreated:
 ## Change Log
 - V0 — initial scaffold
 - V1 — CTO Vision slide deck: 16-slide AI-Native Operational Advantage presentation
+- V2 — Soleil & Co. e-commerce operations dashboard (soleil-dashboard/): realtime DTC beauty brand ops with marketing LTV, CS, inventory, fulfillment, alerts, AI insights, leaderboards, channel comparison; scenario-based data sim (100+ SKUs), Chart.js, 30-min auto-refresh
