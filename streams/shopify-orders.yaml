@@ -1,0 +1,35 @@
+apiVersion: streams/v1
+
+source: shopify
+stream: orders
+display_name: Shopify Orders
+
+mode: graphql+webhook
+api_version: "2024-01"
+
+schedule: rate(5 minutes)
+backfill_enabled: false
+
+schema_version: shopify.order.v3
+normalizes_to: commerce_order
+
+idempotency_key:
+  - order_id
+  - updated_at
+cursor_field: updated_at
+cursor_type: datetime
+
+freshness_sla_minutes: 10
+max_pages_per_run: 200
+page_size: 50
+rate_limit_bucket: shopify
+
+webhook_topics:
+  - orders/create
+  - orders/updated
+hmac_header: X-Shopify-Hmac-Sha256
+
+owner: platform
+tags:
+  - commerce
+  - critical
