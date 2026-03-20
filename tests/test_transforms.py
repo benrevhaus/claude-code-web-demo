@@ -38,6 +38,59 @@ class TestRawModelParsing:
         page = ShopifyOrdersPageRaw(orders=orders)
         assert len(page.orders) == 3
 
+    def test_parse_graphql_orders_page(self):
+        page = ShopifyOrdersPageRaw(
+            **{
+                "data": {
+                    "orders": {
+                        "edges": [
+                            {
+                                "cursor": "abc",
+                                "node": {
+                                    "id": "gid://shopify/Order/5678901234",
+                                    "name": "#1042",
+                                    "email": "alice@example.com",
+                                    "displayFinancialStatus": "PAID",
+                                    "displayFulfillmentStatus": "FULFILLED",
+                                    "currentTotalPriceSet": {
+                                        "shopMoney": {"amount": "149.99", "currencyCode": "USD"}
+                                    },
+                                    "createdAt": "2024-03-15T10:00:00Z",
+                                    "updatedAt": "2024-03-15T11:30:00Z",
+                                    "tags": ["vip", "repeat-buyer"],
+                                    "lineItems": {
+                                        "edges": [
+                                            {
+                                                "node": {
+                                                    "id": "gid://shopify/LineItem/1",
+                                                    "name": "Octa Tee",
+                                                    "quantity": 2,
+                                                    "sku": "OCT-BLK-M",
+                                                    "vendor": "Octa",
+                                                    "variant": {
+                                                        "id": "gid://shopify/ProductVariant/2",
+                                                        "product": {"id": "gid://shopify/Product/3"},
+                                                    },
+                                                    "originalUnitPriceSet": {
+                                                        "shopMoney": {"amount": "49.99", "currencyCode": "USD"}
+                                                    },
+                                                }
+                                            }
+                                        ]
+                                    },
+                                },
+                            }
+                        ]
+                    }
+                }
+            }
+        )
+
+        assert len(page.orders) == 1
+        assert page.orders[0].id == 5678901234
+        assert page.orders[0].line_items[0].variant_id == 2
+        assert page.orders[0].line_items[0].product_id == 3
+
 
 class TestTransform:
     """Transform should produce correct canonical output."""

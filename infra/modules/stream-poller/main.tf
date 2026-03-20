@@ -24,27 +24,16 @@ locals {
 # Lambda Functions
 # -----------------------------------------------------------------------------
 
-# Placeholder deployment package — replaced by CI/CD or manual deploy
-data "archive_file" "placeholder" {
-  type        = "zip"
-  output_path = "${path.module}/placeholder.zip"
-
-  source {
-    content  = "def handler(event, context): pass"
-    filename = "handler.py"
-  }
-}
-
 resource "aws_lambda_function" "initializer" {
   function_name = "${local.prefix}-initializer-${var.env}"
   role          = var.initializer_role_arn
-  handler       = "handler.handler"
+  handler       = "src.lambdas.initializer.handler.handler"
   runtime       = "python3.12"
   timeout       = 30
   memory_size   = 128
 
-  filename         = data.archive_file.placeholder.output_path
-  source_code_hash = data.archive_file.placeholder.output_base64sha256
+  filename         = var.lambda_package_file
+  source_code_hash = filebase64sha256(var.lambda_package_file)
 
   vpc_config {
     subnet_ids         = var.vpc_subnet_ids
@@ -68,13 +57,13 @@ resource "aws_lambda_function" "initializer" {
 resource "aws_lambda_function" "poller" {
   function_name = "${local.prefix}-poller-${var.env}"
   role          = var.poller_role_arn
-  handler       = "handler.handler"
+  handler       = "src.lambdas.poller.handler.handler"
   runtime       = "python3.12"
   timeout       = var.lambda_timeout
   memory_size   = var.lambda_memory
 
-  filename         = data.archive_file.placeholder.output_path
-  source_code_hash = data.archive_file.placeholder.output_base64sha256
+  filename         = var.lambda_package_file
+  source_code_hash = filebase64sha256(var.lambda_package_file)
 
   vpc_config {
     subnet_ids         = var.vpc_subnet_ids
@@ -99,14 +88,14 @@ resource "aws_lambda_function" "poller" {
 resource "aws_lambda_function" "processor" {
   function_name                  = "${local.prefix}-processor-${var.env}"
   role                           = var.processor_role_arn
-  handler                        = "handler.handler"
+  handler                        = "src.lambdas.processor.handler.handler"
   runtime                        = "python3.12"
   timeout                        = var.lambda_timeout
   memory_size                    = var.lambda_memory
   reserved_concurrent_executions = var.processor_reserved_concurrency
 
-  filename         = data.archive_file.placeholder.output_path
-  source_code_hash = data.archive_file.placeholder.output_base64sha256
+  filename         = var.lambda_package_file
+  source_code_hash = filebase64sha256(var.lambda_package_file)
 
   vpc_config {
     subnet_ids         = var.vpc_subnet_ids
@@ -131,13 +120,13 @@ resource "aws_lambda_function" "processor" {
 resource "aws_lambda_function" "finalizer" {
   function_name = "${local.prefix}-finalizer-${var.env}"
   role          = var.finalizer_role_arn
-  handler       = "handler.handler"
+  handler       = "src.lambdas.finalizer.handler.handler"
   runtime       = "python3.12"
   timeout       = 60
   memory_size   = 128
 
-  filename         = data.archive_file.placeholder.output_path
-  source_code_hash = data.archive_file.placeholder.output_base64sha256
+  filename         = var.lambda_package_file
+  source_code_hash = filebase64sha256(var.lambda_package_file)
 
   vpc_config {
     subnet_ids         = var.vpc_subnet_ids
@@ -168,8 +157,8 @@ resource "aws_iam_role" "step_function" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
       Principal = { Service = "states.amazonaws.com" }
     }]
   })
@@ -185,8 +174,8 @@ resource "aws_iam_role_policy" "step_function" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = ["lambda:InvokeFunction"]
+        Effect = "Allow"
+        Action = ["lambda:InvokeFunction"]
         Resource = [
           aws_lambda_function.initializer.arn,
           aws_lambda_function.poller.arn,
@@ -195,8 +184,8 @@ resource "aws_iam_role_policy" "step_function" {
         ]
       },
       {
-        Effect   = "Allow"
-        Action   = [
+        Effect = "Allow"
+        Action = [
           "logs:CreateLogDelivery",
           "logs:GetLogDelivery",
           "logs:UpdateLogDelivery",
@@ -250,27 +239,28 @@ resource "aws_sfn_state_machine" "poll" {
         Parameters = {
           FunctionName = aws_lambda_function.initializer.arn
           Payload = {
-            "source.$"              = "$.source"
-            "stream.$"              = "$.stream"
-            "store_id.$"            = "$.store_id"
-            "max_pages.$"           = "$.max_pages"
-            "cursor_override.$"     = "$.cursor_override"
-            "max_pages_override.$"  = "$.max_pages_override"
+            "source.$"             = "$.source"
+            "stream.$"             = "$.stream"
+            "store_id.$"           = "$.store_id"
+            "max_pages.$"          = "$.max_pages"
+            "cursor_override.$"    = "$.cursor_override"
+            "max_pages_override.$" = "$.max_pages_override"
           }
         }
         ResultSelector = {
-          "run_id.$"        = "$.Payload.run_id"
-          "stream_config.$" = "$.Payload.stream_config"
-          "store_id.$"      = "$.Payload.store_id"
-          "cursor.$"        = "$.Payload.cursor"
-          "page_number.$"   = "$.Payload.page_number"
-          "total_records.$" = "$.Payload.total_records"
-          "total_pages.$"   = "$.Payload.total_pages"
-          "max_pages.$"     = "$.Payload.max_pages"
-          "status.$"        = "$.Payload.status"
+          "run_id.$"            = "$.Payload.run_id"
+          "stream_config.$"     = "$.Payload.stream_config"
+          "store_id.$"          = "$.Payload.store_id"
+          "cursor.$"            = "$.Payload.cursor"
+          "checkpoint_cursor.$" = "$.Payload.checkpoint_cursor"
+          "page_number.$"       = "$.Payload.page_number"
+          "total_records.$"     = "$.Payload.total_records"
+          "total_pages.$"       = "$.Payload.total_pages"
+          "max_pages.$"         = "$.Payload.max_pages"
+          "status.$"            = "$.Payload.status"
         }
         ResultPath = "$"
-        Next = "FetchPage"
+        Next       = "FetchPage"
       }
 
       FetchPage = {
@@ -292,6 +282,7 @@ resource "aws_sfn_state_machine" "poll" {
           "s3_key.$"               = "$.Payload.s3_key"
           "record_count.$"         = "$.Payload.record_count"
           "next_cursor.$"          = "$.Payload.next_cursor"
+          "checkpoint_cursor.$"    = "$.Payload.checkpoint_cursor"
           "has_more.$"             = "$.Payload.has_more"
           "http_status.$"          = "$.Payload.http_status"
           "rate_limit_remaining.$" = "$.Payload.rate_limit_remaining"
@@ -344,16 +335,36 @@ resource "aws_sfn_state_machine" "poll" {
         Type    = "Pass"
         Comment = "Update running totals and cursor for next iteration"
         Parameters = {
-          "run_id.$"        = "$.run_id"
-          "stream_config.$" = "$.stream_config"
-          "store_id.$"      = "$.store_id"
-          "cursor.$"        = "$.fetch_result.next_cursor"
-          "page_number.$"   = "States.MathAdd($.page_number, 1)"
-          "total_records.$" = "States.MathAdd($.total_records, $.fetch_result.record_count)"
-          "total_pages.$"   = "States.MathAdd($.total_pages, 1)"
-          "has_more.$"      = "$.fetch_result.has_more"
-          "max_pages.$"     = "$.max_pages"
-          "status"          = "running"
+          "run_id.$"            = "$.run_id"
+          "stream_config.$"     = "$.stream_config"
+          "store_id.$"          = "$.store_id"
+          "cursor.$"            = "$.fetch_result.next_cursor"
+          "checkpoint_cursor.$" = "$.fetch_result.checkpoint_cursor"
+          "page_number.$"       = "States.MathAdd($.page_number, 1)"
+          "total_records.$"     = "States.MathAdd($.total_records, $.fetch_result.record_count)"
+          "total_pages.$"       = "States.MathAdd($.total_pages, 1)"
+          "has_more.$"          = "$.fetch_result.has_more"
+          "max_pages.$"         = "$.max_pages"
+          "status"              = "success"
+        }
+        Next = "CheckMore"
+      }
+
+      UpdateAccumulatorPartial = {
+        Type    = "Pass"
+        Comment = "Update running totals after a process error and preserve partial failure status"
+        Parameters = {
+          "run_id.$"            = "$.run_id"
+          "stream_config.$"     = "$.stream_config"
+          "store_id.$"          = "$.store_id"
+          "cursor.$"            = "$.fetch_result.next_cursor"
+          "checkpoint_cursor.$" = "$.fetch_result.checkpoint_cursor"
+          "page_number.$"       = "States.MathAdd($.page_number, 1)"
+          "total_records.$"     = "States.MathAdd($.total_records, $.fetch_result.record_count)"
+          "total_pages.$"       = "States.MathAdd($.total_pages, 1)"
+          "has_more.$"          = "$.fetch_result.has_more"
+          "max_pages.$"         = "$.max_pages"
+          "status"              = "partial_failure"
         }
         Next = "CheckMore"
       }
@@ -366,7 +377,7 @@ resource "aws_sfn_state_machine" "poll" {
               { Variable = "$.has_more", BooleanEquals = true },
               { Variable = "$.page_number", NumericLessThanPath = "$.max_pages" }
             ]
-            Next = "ThrottleWait"
+            Next = "CheckRateLimitWait"
           }
         ]
         Default = "PrepareFinalize"
@@ -382,11 +393,27 @@ resource "aws_sfn_state_machine" "poll" {
           "store_id.$"      = "$.store_id"
           "total_pages.$"   = "$.total_pages"
           "total_records.$" = "$.total_records"
-          "status"          = "success"
-          "final_cursor.$"  = "$.cursor"
+          "status.$"        = "$.status"
+          "final_cursor.$"  = "$.checkpoint_cursor"
           "error_message"   = null
         }
         Next = "Finalize"
+      }
+
+      CheckRateLimitWait = {
+        Type = "Choice"
+        Choices = [{
+          Variable = "$.fetch_result.rate_limit_reset_at"
+          IsNull   = false
+          Next     = "ThrottleUntilReset"
+        }]
+        Default = "ThrottleWait"
+      }
+
+      ThrottleUntilReset = {
+        Type          = "Wait"
+        TimestampPath = "$.fetch_result.rate_limit_reset_at"
+        Next          = "FetchPage"
       }
 
       ThrottleWait = {
@@ -405,7 +432,7 @@ resource "aws_sfn_state_machine" "poll" {
           "total_records.$" = "$.total_records"
           "status"          = "partial_failure"
           "error_message.$" = "States.Format('Fetch failed: {}', $.error.Cause)"
-          "final_cursor.$"  = "$.cursor"
+          "final_cursor.$"  = "$.checkpoint_cursor"
         }
         Next = "Finalize"
       }
@@ -413,9 +440,20 @@ resource "aws_sfn_state_machine" "poll" {
       HandleProcessError = {
         Type    = "Pass"
         Comment = "Log process error but continue — don't abort the run"
-        Result  = { "status" = "partial_failure" }
-        ResultPath = "$.process_status"
-        Next    = "UpdateAccumulator"
+        Parameters = {
+          "run_id.$"            = "$.run_id"
+          "stream_config.$"     = "$.stream_config"
+          "store_id.$"          = "$.store_id"
+          "cursor.$"            = "$.fetch_result.next_cursor"
+          "checkpoint_cursor.$" = "$.fetch_result.checkpoint_cursor"
+          "page_number.$"       = "$.page_number"
+          "total_records.$"     = "$.total_records"
+          "total_pages.$"       = "$.total_pages"
+          "fetch_result.$"      = "$.fetch_result"
+          "max_pages.$"         = "$.max_pages"
+          "status"              = "partial_failure"
+        }
+        Next = "UpdateAccumulatorPartial"
       }
 
       Finalize = {
@@ -424,18 +462,18 @@ resource "aws_sfn_state_machine" "poll" {
         Parameters = {
           FunctionName = aws_lambda_function.finalizer.arn
           Payload = {
-            "run_id.$"         = "$.run_id"
-            "stream_config.$"  = "$.stream_config"
-            "store_id.$"       = "$.store_id"
-            "total_pages.$"    = "$.total_pages"
-            "total_records.$"  = "$.total_records"
-            "status.$"         = "$.status"
-            "final_cursor.$"   = "$.final_cursor"
-            "error_message.$"  = "$.error_message"
+            "run_id.$"        = "$.run_id"
+            "stream_config.$" = "$.stream_config"
+            "store_id.$"      = "$.store_id"
+            "total_pages.$"   = "$.total_pages"
+            "total_records.$" = "$.total_records"
+            "status.$"        = "$.status"
+            "final_cursor.$"  = "$.final_cursor"
+            "error_message.$" = "$.error_message"
           }
         }
         ResultPath = "$.finalize_result"
-        End = true
+        End        = true
       }
     }
   })
@@ -453,8 +491,8 @@ resource "aws_iam_role" "eventbridge" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
       Principal = { Service = "events.amazonaws.com" }
     }]
   })
@@ -493,11 +531,11 @@ resource "aws_cloudwatch_event_target" "step_function" {
   role_arn = aws_iam_role.eventbridge.arn
 
   input = jsonencode({
-    source           = var.source_name
-    stream           = var.stream_name
-    store_id         = "default"
-    max_pages        = 200
-    cursor_override  = null
+    source             = var.source_name
+    stream             = var.stream_name
+    store_id           = "default"
+    max_pages          = 200
+    cursor_override    = null
     max_pages_override = null
   })
 }

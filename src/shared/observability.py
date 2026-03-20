@@ -69,6 +69,14 @@ class MetricsClient:
             dimensions={"source": source, "stream": stream},
         )
 
+    def emit_run_duration(self, source: str, stream: str, duration_seconds: float):
+        self.put_metric(
+            "run_duration_seconds",
+            duration_seconds,
+            unit="Seconds",
+            dimensions={"source": source, "stream": stream},
+        )
+
     def emit_api_health(self, source: str, stream: str, http_status: int):
         dims = {"source": source, "stream": stream}
         self.put_metric("pages_fetched", 1, unit="Count", dimensions=dims)

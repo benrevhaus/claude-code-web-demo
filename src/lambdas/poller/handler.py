@@ -13,6 +13,7 @@ from src.shared.contracts import PollerInput, PollerOutput
 from src.shared.dynamo_control import DynamoControl
 from src.shared.observability import MetricsClient, setup_logging
 from src.shared.s3_writer import S3Writer
+from src.shared.shopify_client import ShopifyOrdersClient
 
 log = setup_logging("shopify-poller")
 
@@ -63,7 +64,7 @@ def handler(event: dict, context=None) -> dict:
     shopify = _shopify_client or _default_shopify_client()
     response = shopify.fetch_page(
         store_id=inp.store_id,
-        endpoint=config.stream,
+        endpoint=config.endpoint or config.stream,
         api_version=config.api_version,
         cursor=inp.cursor,
         page_size=config.page_size,
@@ -110,6 +111,7 @@ def handler(event: dict, context=None) -> dict:
         s3_key=s3_key,
         record_count=response.record_count,
         next_cursor=response.next_cursor,
+        checkpoint_cursor=response.checkpoint_cursor,
         has_more=response.has_more,
         http_status=response.status_code,
         rate_limit_remaining=response.rate_limit_remaining,
@@ -137,6 +139,7 @@ class ShopifyResponse:
         status_code: int = 200,
         record_count: int = 0,
         next_cursor: str | None = None,
+        checkpoint_cursor: str | None = None,
         has_more: bool = False,
         rate_limit_remaining: int | None = None,
         rate_limit_reset_at=None,
@@ -145,13 +148,11 @@ class ShopifyResponse:
         self.status_code = status_code
         self.record_count = record_count
         self.next_cursor = next_cursor
+        self.checkpoint_cursor = checkpoint_cursor
         self.has_more = has_more
         self.rate_limit_remaining = rate_limit_remaining
         self.rate_limit_reset_at = rate_limit_reset_at
 
 
 def _default_shopify_client():
-    raise NotImplementedError(
-        "No Shopify client configured. Inject _shopify_client for local testing "
-        "or set up real credentials for AWS deployment."
-    )
+    return ShopifyOrdersClient()

@@ -13,6 +13,51 @@ All contracts live in `src/shared/contracts.py` as Pydantic models.
 
 ---
 
+## initializer
+
+**Purpose:** Load stream config, read the current cursor, create a run record, and seed the Step Function state.
+**Invoked by:** Step Functions task state.
+
+### Input
+
+```python
+class InitializerInput(BaseModel):
+    source: str
+    stream: str
+    store_id: str
+    max_pages: Optional[int]
+    cursor_override: Optional[str]
+    max_pages_override: Optional[int]
+```
+
+### Output
+
+```python
+class InitializerOutput(BaseModel):
+    run_id: str
+    stream_config: StreamConfig
+    store_id: str
+    cursor: Optional[str]
+    checkpoint_cursor: Optional[str]
+    page_number: int
+    total_records: int
+    total_pages: int
+    max_pages: int
+    status: str
+```
+
+### Behavior rules
+
+1. Loads the stream config from `streams/`.
+2. Reads the current cursor from DynamoDB unless `cursor_override` is provided.
+3. Creates a run record in DynamoDB with status `running`.
+4. Returns the initial state accumulator for the polling Step Function.
+5. Seeds both:
+   - `cursor`: the poller cursor state
+   - `checkpoint_cursor`: the last durable datetime checkpoint used for freshness/finalization
+
+---
+
 ## shopify-poller
 
 **Purpose:** Fetch one page from Shopify API, write raw to S3, return cursor.
@@ -36,7 +81,8 @@ class PollerOutput(BaseModel):
     run_id: str
     s3_key: str                    # Where raw payload was written
     record_count: int              # Items in this page
-    next_cursor: Optional[str]     # None = no more pages
+    next_cursor: Optional[str]     # Opaque pagination state for the next page
+    checkpoint_cursor: Optional[str]  # Last order.updated_at seen in this page
     has_more: bool                 # Explicit boolean for Step Function Choice state
     http_status: int               # Vendor API response code
     rate_limit_remaining: Optional[int]    # From response headers
@@ -45,13 +91,16 @@ class PollerOutput(BaseModel):
 
 ### Behavior rules
 
-1. Calls Shopify API for one page using `cursor` from input.
+1. Calls Shopify GraphQL Admin API for one page using `cursor` from input.
 2. Writes raw response body to S3 (full JSON, gzipped) using standard key pattern.
-3. Updates DynamoDB run record with page count and cursor.
-4. Returns output. Does NOT decide whether to continue — Step Function decides.
-5. On 429: Returns output with `has_more=True` and `rate_limit_reset_at` populated. Does not retry.
-6. On 5xx: Raises exception. Step Function retry policy handles retries.
-7. On 2xx with empty results: Returns `has_more=False`, `record_count=0`.
+3. Updates DynamoDB run record with page count.
+4. Returns both:
+   - `next_cursor` for in-run pagination
+   - `checkpoint_cursor` for final checkpoint/freshness
+5. Does NOT decide whether to continue — Step Function decides.
+6. On 429: Returns output with `has_more=True` and `rate_limit_reset_at` populated. Does not retry.
+7. On 5xx: Raises exception. Step Function retry policy handles retries.
+8. On 2xx with empty results: Returns `has_more=False`, `record_count=0`.
 
 ### What this Lambda does NOT do
 
@@ -200,7 +249,6 @@ class FinalizerOutput(BaseModel):
 4. Publishes CloudWatch custom metrics:
    - `streams/freshness_lag_minutes`
    - `streams/run_duration_seconds`
-   - `streams/records_processed` (total)
 5. If freshness exceeds SLA from stream config, metric triggers CloudWatch alarm.
 
 ### What this Lambda does NOT do

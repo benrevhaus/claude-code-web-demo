@@ -55,6 +55,7 @@ def handler(event: dict, context=None) -> dict:
         stream_config=stream_config,
         store_id=inp.store_id,
         cursor=current_cursor,
+        checkpoint_cursor=current_cursor,
         max_pages=max_pages,
     )
 

@@ -58,12 +58,13 @@ module "platform" {
 module "shopify_orders_poller" {
   source = "../../modules/stream-poller"
 
-  env                         = local.env
-  source_name                 = "shopify"
-  stream_name                 = "orders"
-  schedule_expression         = "rate(5 minutes)"
-  freshness_sla_minutes       = 10
+  env                            = local.env
+  source_name                    = "shopify"
+  stream_name                    = "orders"
+  schedule_expression            = "rate(5 minutes)"
+  freshness_sla_minutes          = 10
   processor_reserved_concurrency = 5
+  lambda_package_file            = "${path.root}/../../../dist/lambda/data-streams.zip"
 
   raw_bucket_name             = module.platform.raw_bucket_name
   control_table_name          = module.platform.control_table_name

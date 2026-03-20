@@ -3,10 +3,14 @@
 This is the ONLY module that talks to Postgres.
 """
 
+import os
 import json
 from typing import Any, Optional
 
+import psycopg2
 from pydantic import BaseModel
+
+from src.shared.ssm import get_env_or_ssm
 
 
 class PgClient:
@@ -19,6 +23,19 @@ class PgClient:
     def __init__(self, connection: Optional[Any] = None, connection_factory: Optional[Any] = None):
         self._conn = connection
         self._factory = connection_factory
+
+    @classmethod
+    def from_env(cls) -> "PgClient":
+        """Build a client that lazily connects using env/SSM configuration."""
+        env = os.environ.get("ENV", "dev")
+        prefix = os.environ.get("PARAM_PREFIX", "data-streams")
+        parameter_name = os.environ.get("POSTGRES_CONNECTION_STRING_PARAM", f"/{prefix}/{env}/postgres/connection_string")
+
+        def _connect():
+            conninfo = get_env_or_ssm("POSTGRES_CONNECTION_STRING", parameter_name)
+            return psycopg2.connect(conninfo)
+
+        return cls(connection_factory=_connect)
 
     def _ensure_connection(self):
         if self._conn is None:

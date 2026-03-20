@@ -46,6 +46,13 @@ class DynamoControl:
         self._table.put_item(Item=item)
         return item
 
+    def get_run(self, source: str, stream: str, store_id: str, run_id: str) -> Optional[dict]:
+        self._ensure_table()
+        response = self._table.get_item(
+            Key={"PK": f"STREAM#{source}#{stream}#{store_id}", "SK": f"RUN#{run_id}"}
+        )
+        return response.get("Item")
+
     def update_run(self, source: str, stream: str, store_id: str, run_id: str, **updates) -> None:
         self._ensure_table()
         expr_parts = []

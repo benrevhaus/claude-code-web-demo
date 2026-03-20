@@ -116,10 +116,18 @@ class TestEndToEndLocal:
         orders = load_all_order_fixtures()
         mock_shopify = MagicMock()
         mock_shopify.fetch_page.return_value = ShopifyResponse(
-            body={"orders": orders},
+            body={
+                "data": {
+                    "orders": {
+                        "edges": [{"node": order} for order in orders],
+                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    }
+                }
+            },
             status_code=200,
             record_count=len(orders),
             next_cursor=None,
+            checkpoint_cursor="2024-03-15T11:30:00Z",
             has_more=False,
         )
         poller_mod._shopify_client = mock_shopify
@@ -148,7 +156,7 @@ class TestEndToEndLocal:
 
         # Verify raw payload in S3
         raw_back = aws_env["s3_writer"].read_raw(s3_key)
-        assert len(raw_back["orders"]) == 3
+        assert len(raw_back["data"]["orders"]["edges"]) == 3
 
         # --- Step 2: Processor ---
         processor_mod._s3_writer = aws_env["s3_writer"]
@@ -216,9 +224,18 @@ class TestEndToEndLocal:
 
         mock_shopify = MagicMock()
         mock_shopify.fetch_page.return_value = ShopifyResponse(
-            body={"orders": [load_all_order_fixtures()[0]]},
+            body={
+                "data": {
+                    "orders": {
+                        "edges": [{"node": load_all_order_fixtures()[0]}],
+                        "pageInfo": {"hasNextPage": True, "endCursor": "opaque-cursor"},
+                    }
+                }
+            },
             status_code=200, record_count=1,
-            next_cursor="2024-03-15T10:00:00Z", has_more=True,
+            next_cursor='{"checkpoint":"2024-03-15T10:00:00Z","page_cursor":"opaque-cursor"}',
+            checkpoint_cursor="2024-03-15T10:00:00Z",
+            has_more=True,
         )
         poller_mod._shopify_client = mock_shopify
 
@@ -229,8 +246,8 @@ class TestEndToEndLocal:
         ).model_dump(mode="json"))
 
         assert result["has_more"] is True
-        assert result["next_cursor"] == "2024-03-15T10:00:00Z"
+        assert result["next_cursor"] == '{"checkpoint":"2024-03-15T10:00:00Z","page_cursor":"opaque-cursor"}'
 
         # Verify S3 object exists and is readable
         raw = aws_env["s3_writer"].read_raw(result["s3_key"])
-        assert len(raw["orders"]) == 1
+        assert len(raw["data"]["orders"]["edges"]) == 1

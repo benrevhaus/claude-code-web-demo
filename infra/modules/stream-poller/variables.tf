@@ -43,6 +43,11 @@ variable "processor_reserved_concurrency" {
   default     = 5
 }
 
+variable "lambda_package_file" {
+  description = "Path to the built Lambda deployment zip"
+  type        = string
+}
+
 # Passed from stream-platform
 variable "raw_bucket_name" { type = string }
 variable "control_table_name" { type = string }

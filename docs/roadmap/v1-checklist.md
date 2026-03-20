@@ -34,6 +34,7 @@
 - [ ] SSM parameter paths created (with placeholder values):
   - `/data-streams/{env}/shopify/api_key`
   - `/data-streams/{env}/shopify/api_secret`
+  - `/data-streams/{env}/shopify/access_token`
   - `/data-streams/{env}/shopify/webhook_secret`
   - `/data-streams/{env}/postgres/connection_string`
 - [ ] `terraform plan` is clean

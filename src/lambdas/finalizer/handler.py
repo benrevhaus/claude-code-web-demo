@@ -73,6 +73,7 @@ def handler(event: dict, context=None) -> dict:
 
     # Compute freshness
     freshness_lag = 0.0
+    run_duration_seconds = 0.0
     if inp.final_cursor:
         freshness_lag = dynamo.update_freshness(
             source=config.source,
@@ -81,9 +82,15 @@ def handler(event: dict, context=None) -> dict:
             last_record_at=inp.final_cursor,
         )
 
+    run_record = dynamo.get_run(config.source, config.stream, inp.store_id, inp.run_id)
+    if run_record and run_record.get("started_at"):
+        started_at = datetime.fromisoformat(run_record["started_at"].replace("Z", "+00:00"))
+        run_duration_seconds = max((datetime.now(timezone.utc) - started_at).total_seconds(), 0.0)
+
     # Emit CloudWatch metrics (records_processed already emitted by processor per-page)
     metrics = _get_metrics()
     metrics.emit_freshness(config.source, config.stream, inp.store_id, freshness_lag)
+    metrics.emit_run_duration(config.source, config.stream, run_duration_seconds)
 
     output = FinalizerOutput(
         run_id=inp.run_id,
