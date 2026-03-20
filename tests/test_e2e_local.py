@@ -16,7 +16,7 @@ from moto import mock_aws
 from schemas.raw.shopify.order import ShopifyOrdersPageRaw
 from src.lambdas.finalizer import handler as finalizer_mod
 from src.lambdas.poller import handler as poller_mod
-from src.lambdas.poller.handler import ShopifyResponse
+from src.shared.shopify_client import ShopifyPage
 from src.lambdas.processor import handler as processor_mod
 from src.shared.contracts import FinalizerInput, PollerInput, ProcessorInput
 from src.shared.dynamo_control import DynamoControl
@@ -115,7 +115,7 @@ class TestEndToEndLocal:
         # Mock Shopify client that returns our fixtures
         orders = load_all_order_fixtures()
         mock_shopify = MagicMock()
-        mock_shopify.fetch_page.return_value = ShopifyResponse(
+        mock_shopify.fetch_page.return_value = ShopifyPage(
             body={
                 "data": {
                     "orders": {
@@ -223,7 +223,7 @@ class TestEndToEndLocal:
         poller_mod._metrics = aws_env["metrics"]
 
         mock_shopify = MagicMock()
-        mock_shopify.fetch_page.return_value = ShopifyResponse(
+        mock_shopify.fetch_page.return_value = ShopifyPage(
             body={
                 "data": {
                     "orders": {

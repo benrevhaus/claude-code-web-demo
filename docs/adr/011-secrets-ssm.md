@@ -7,7 +7,7 @@
 
 ## Context
 
-Lambda functions need access to Shopify API keys, Postgres credentials, webhook secrets, and other sensitive values. Where do these live?
+Lambda functions need access to Shopify API tokens, Postgres credentials, webhook secrets, and other sensitive values. Where do these live?
 
 ## Decision
 
@@ -19,8 +19,6 @@ Lambda functions need access to Shopify API keys, Postgres credentials, webhook 
 /data-streams/{env}/{source}/{secret_name}
 
 # Examples:
-/data-streams/prod/shopify/api_key
-/data-streams/prod/shopify/api_secret
 /data-streams/prod/shopify/access_token
 /data-streams/prod/shopify/webhook_secret
 /data-streams/prod/postgres/connection_string
@@ -38,8 +36,8 @@ Lambda functions need access to Shopify API keys, Postgres credentials, webhook 
 - **Terraform does NOT set the actual secret values.** Values are set manually via AWS Console or CLI. This prevents secrets from appearing in Terraform state files.
 
 ```hcl
-resource "aws_ssm_parameter" "shopify_api_key" {
-  name  = "/data-streams/${var.env}/shopify/api_key"
+resource "aws_ssm_parameter" "shopify_access_token" {
+  name  = "/data-streams/${var.env}/shopify/access_token"
   type  = "SecureString"
   value = "PLACEHOLDER"  # Set manually after apply
   lifecycle {

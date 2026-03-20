@@ -21,6 +21,7 @@ docker run --rm \
 
 cp -R "${ROOT_DIR}/src" "${PACKAGE_DIR}/src"
 cp -R "${ROOT_DIR}/schemas" "${PACKAGE_DIR}/schemas"
+cp -R "${ROOT_DIR}/streams" "${PACKAGE_DIR}/streams"
 
 (
   cd "${PACKAGE_DIR}"

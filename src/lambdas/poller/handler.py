@@ -129,30 +129,5 @@ def handler(event: dict, context=None) -> dict:
     return output.model_dump(mode="json")
 
 
-# --- Shopify client abstraction (for injection/mocking) ---
-
-
-class ShopifyResponse:
-    def __init__(
-        self,
-        body: dict,
-        status_code: int = 200,
-        record_count: int = 0,
-        next_cursor: str | None = None,
-        checkpoint_cursor: str | None = None,
-        has_more: bool = False,
-        rate_limit_remaining: int | None = None,
-        rate_limit_reset_at=None,
-    ):
-        self.body = body
-        self.status_code = status_code
-        self.record_count = record_count
-        self.next_cursor = next_cursor
-        self.checkpoint_cursor = checkpoint_cursor
-        self.has_more = has_more
-        self.rate_limit_remaining = rate_limit_remaining
-        self.rate_limit_reset_at = rate_limit_reset_at
-
-
 def _default_shopify_client():
     return ShopifyOrdersClient()

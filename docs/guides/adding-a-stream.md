@@ -90,13 +90,27 @@ def transform_shopify_customer(raw: ShopifyCustomerRaw, store_id: str) -> Shopif
 Add an entry to the processor's schema registry (`src/shared/schema_registry.py`):
 
 ```python
-SCHEMA_REGISTRY[("shopify", "customers")] = {
-    "raw_model": ShopifyCustomerRaw,
-    "canonical_model": ShopifyCustomerV1,
-    "pg_table": "shopify.customers",
-    "transform": transform_shopify_customer,
-}
+from schemas.raw.shopify.customer import ShopifyCustomerRaw, ShopifyCustomersPageRaw
+from schemas.canonical.shopify.customer_v1 import ShopifyCustomerV1
+from schemas.canonical.shopify.transforms import transform_shopify_customer
+
+SCHEMA_REGISTRY[("shopify", "customers")] = SchemaEntry(
+    raw_model=ShopifyCustomerRaw,
+    raw_page_model=ShopifyCustomersPageRaw,
+    canonical_model=ShopifyCustomerV1,
+    transform=transform_shopify_customer,
+    pg_table="shopify.customers",
+    version="shopify.customer.v1",
+    record_list_field="customers",
+    idempotency_field_map={"customer_id": "id", "updated_at": "updated_at"},
+)
 ```
+
+Key fields:
+- **`raw_page_model`** — the wrapper model that holds a list of raw records (e.g., a page of API results)
+- **`record_list_field`** — the field name on the page model that contains the record list
+- **`version`** — must match `schema_version` in the stream YAML
+- **`idempotency_field_map`** — maps stream YAML `idempotency_key` field names to canonical model field names (e.g., `customer_id` in the YAML → `id` in the canonical model)
 
 ### 4. Create the Postgres table (30 minutes)
 

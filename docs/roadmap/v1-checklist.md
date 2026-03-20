@@ -32,8 +32,6 @@
 - [ ] Step Function: parameterized from stream config, 30-minute timeout
 - [ ] CloudWatch log groups: 30-day retention for prod, 7-day for dev
 - [ ] SSM parameter paths created (with placeholder values):
-  - `/data-streams/{env}/shopify/api_key`
-  - `/data-streams/{env}/shopify/api_secret`
   - `/data-streams/{env}/shopify/access_token`
   - `/data-streams/{env}/shopify/webhook_secret`
   - `/data-streams/{env}/postgres/connection_string`
@@ -44,8 +42,8 @@
 
 ## Secrets (Manual, Post-Terraform)
 
-- [ ] Set Shopify API key in SSM
-- [ ] Set Shopify API secret in SSM
+- [ ] Set Shopify access token in SSM (GraphQL Admin API bearer token)
+- [ ] Set Shopify webhook secret in SSM
 - [ ] Set Postgres connection string in SSM
 - [ ] Verify Lambda can read SSM values (test invocation)
 

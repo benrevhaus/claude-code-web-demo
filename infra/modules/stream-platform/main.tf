@@ -401,30 +401,6 @@ resource "aws_cloudwatch_metric_alarm" "dlq_messages" {
 # SSM Parameters (placeholders — set real values manually post-deploy)
 # -----------------------------------------------------------------------------
 
-resource "aws_ssm_parameter" "shopify_api_key" {
-  name  = "/${local.prefix}/${var.env}/shopify/api_key"
-  type  = "SecureString"
-  value = "PLACEHOLDER"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
-
-  tags = var.tags
-}
-
-resource "aws_ssm_parameter" "shopify_api_secret" {
-  name  = "/${local.prefix}/${var.env}/shopify/api_secret"
-  type  = "SecureString"
-  value = "PLACEHOLDER"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
-
-  tags = var.tags
-}
-
 resource "aws_ssm_parameter" "shopify_access_token" {
   name  = "/${local.prefix}/${var.env}/shopify/access_token"
   type  = "SecureString"

@@ -134,7 +134,11 @@ class ShopifyOrderRaw(BaseModel):
 
         normalized["id"] = _gid_to_int(normalized.get("id")) or normalized.get("id")
         if normalized.get("order_number") is None and normalized.get("name"):
-            normalized["order_number"] = str(normalized["name"]).lstrip("#")
+            stripped = str(normalized["name"]).lstrip("#")
+            try:
+                normalized["order_number"] = int(stripped)
+            except (ValueError, TypeError):
+                pass
         normalized["financial_status"] = normalized.get("financial_status") or normalized.get("displayFinancialStatus")
         normalized["fulfillment_status"] = normalized.get("fulfillment_status") or normalized.get("displayFulfillmentStatus")
         normalized["total_price"] = normalized.get("total_price") or shop_money.get("amount")

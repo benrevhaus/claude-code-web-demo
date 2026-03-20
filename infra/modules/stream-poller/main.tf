@@ -335,17 +335,18 @@ resource "aws_sfn_state_machine" "poll" {
         Type    = "Pass"
         Comment = "Update running totals and cursor for next iteration"
         Parameters = {
-          "run_id.$"            = "$.run_id"
-          "stream_config.$"     = "$.stream_config"
-          "store_id.$"          = "$.store_id"
-          "cursor.$"            = "$.fetch_result.next_cursor"
-          "checkpoint_cursor.$" = "$.fetch_result.checkpoint_cursor"
-          "page_number.$"       = "States.MathAdd($.page_number, 1)"
-          "total_records.$"     = "States.MathAdd($.total_records, $.fetch_result.record_count)"
-          "total_pages.$"       = "States.MathAdd($.total_pages, 1)"
-          "has_more.$"          = "$.fetch_result.has_more"
-          "max_pages.$"         = "$.max_pages"
-          "status"              = "success"
+          "run_id.$"                 = "$.run_id"
+          "stream_config.$"          = "$.stream_config"
+          "store_id.$"               = "$.store_id"
+          "cursor.$"                 = "$.fetch_result.next_cursor"
+          "checkpoint_cursor.$"      = "$.fetch_result.checkpoint_cursor"
+          "page_number.$"            = "States.MathAdd($.page_number, 1)"
+          "total_records.$"          = "States.MathAdd($.total_records, $.fetch_result.record_count)"
+          "total_pages.$"            = "States.MathAdd($.total_pages, 1)"
+          "has_more.$"               = "$.fetch_result.has_more"
+          "max_pages.$"              = "$.max_pages"
+          "rate_limit_reset_at.$"    = "$.fetch_result.rate_limit_reset_at"
+          "status"                   = "success"
         }
         Next = "CheckMore"
       }
@@ -354,17 +355,18 @@ resource "aws_sfn_state_machine" "poll" {
         Type    = "Pass"
         Comment = "Update running totals after a process error and preserve partial failure status"
         Parameters = {
-          "run_id.$"            = "$.run_id"
-          "stream_config.$"     = "$.stream_config"
-          "store_id.$"          = "$.store_id"
-          "cursor.$"            = "$.fetch_result.next_cursor"
-          "checkpoint_cursor.$" = "$.fetch_result.checkpoint_cursor"
-          "page_number.$"       = "States.MathAdd($.page_number, 1)"
-          "total_records.$"     = "States.MathAdd($.total_records, $.fetch_result.record_count)"
-          "total_pages.$"       = "States.MathAdd($.total_pages, 1)"
-          "has_more.$"          = "$.fetch_result.has_more"
-          "max_pages.$"         = "$.max_pages"
-          "status"              = "partial_failure"
+          "run_id.$"                 = "$.run_id"
+          "stream_config.$"          = "$.stream_config"
+          "store_id.$"               = "$.store_id"
+          "cursor.$"                 = "$.fetch_result.next_cursor"
+          "checkpoint_cursor.$"      = "$.fetch_result.checkpoint_cursor"
+          "page_number.$"            = "States.MathAdd($.page_number, 1)"
+          "total_records.$"          = "States.MathAdd($.total_records, $.fetch_result.record_count)"
+          "total_pages.$"            = "States.MathAdd($.total_pages, 1)"
+          "has_more.$"               = "$.fetch_result.has_more"
+          "max_pages.$"              = "$.max_pages"
+          "rate_limit_reset_at.$"    = "$.fetch_result.rate_limit_reset_at"
+          "status"                   = "partial_failure"
         }
         Next = "CheckMore"
       }
@@ -403,7 +405,7 @@ resource "aws_sfn_state_machine" "poll" {
       CheckRateLimitWait = {
         Type = "Choice"
         Choices = [{
-          Variable = "$.fetch_result.rate_limit_reset_at"
+          Variable = "$.rate_limit_reset_at"
           IsNull   = false
           Next     = "ThrottleUntilReset"
         }]
@@ -412,7 +414,7 @@ resource "aws_sfn_state_machine" "poll" {
 
       ThrottleUntilReset = {
         Type          = "Wait"
-        TimestampPath = "$.fetch_result.rate_limit_reset_at"
+        TimestampPath = "$.rate_limit_reset_at"
         Next          = "FetchPage"
       }
 
@@ -533,7 +535,7 @@ resource "aws_cloudwatch_event_target" "step_function" {
   input = jsonencode({
     source             = var.source_name
     stream             = var.stream_name
-    store_id           = "default"
+    store_id           = var.store_id
     max_pages          = 200
     cursor_override    = null
     max_pages_override = null
