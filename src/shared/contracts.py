@@ -11,6 +11,30 @@ from pydantic import BaseModel
 from src.shared.stream_config import StreamConfig
 
 
+# --- initializer ---
+
+
+class InitializerInput(BaseModel):
+    source: str
+    stream: str
+    store_id: str
+    max_pages: Optional[int] = None
+    cursor_override: Optional[str] = None
+    max_pages_override: Optional[int] = None
+
+
+class InitializerOutput(BaseModel):
+    run_id: str
+    stream_config: StreamConfig
+    store_id: str
+    cursor: Optional[str] = None
+    page_number: int = 1
+    total_records: int = 0
+    total_pages: int = 0
+    max_pages: int
+    status: str = "running"
+
+
 # --- shopify-poller ---
 
 
