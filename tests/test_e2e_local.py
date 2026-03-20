@@ -110,6 +110,7 @@ class TestEndToEndLocal:
         # Inject dependencies
         poller_mod._s3_writer = aws_env["s3_writer"]
         poller_mod._dynamo = aws_env["dynamo"]
+        poller_mod._metrics = aws_env["metrics"]
 
         # Mock Shopify client that returns our fixtures
         orders = load_all_order_fixtures()
@@ -211,6 +212,7 @@ class TestEndToEndLocal:
 
         poller_mod._s3_writer = aws_env["s3_writer"]
         poller_mod._dynamo = aws_env["dynamo"]
+        poller_mod._metrics = aws_env["metrics"]
 
         mock_shopify = MagicMock()
         mock_shopify.fetch_page.return_value = ShopifyResponse(

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 import yaml
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class StreamMode(str, Enum):
@@ -31,6 +31,7 @@ class StreamConfig(BaseModel):
     display_name: str
     mode: StreamMode
     api_version: str
+    endpoint: Optional[str] = None
     schedule: Optional[str] = None
     backfill_enabled: bool = False
     schema_version: str
@@ -45,7 +46,14 @@ class StreamConfig(BaseModel):
     webhook_topics: Optional[list[str]] = None
     hmac_header: Optional[str] = None
     owner: str
-    tags: list[str] = []
+    tags: list[str] = Field(default_factory=list)
+
+    @field_validator("api_version_spec")
+    @classmethod
+    def must_use_supported_spec_version(cls, v: str) -> str:
+        if v != "streams/v1":
+            raise ValueError("apiVersion must be streams/v1")
+        return v
 
     @field_validator("source", "stream")
     @classmethod
@@ -69,6 +77,32 @@ class StreamConfig(BaseModel):
         if len(v) < 1:
             raise ValueError("idempotency_key must contain at least one field")
         return v
+
+    @model_validator(mode="after")
+    def validate_stream_rules(self) -> "StreamConfig":
+        if self.has_polling:
+            if not self.schedule:
+                raise ValueError("schedule is required for polling streams")
+            if not self.cursor_field:
+                raise ValueError("cursor_field is required for polling streams")
+            if self.cursor_type is None:
+                raise ValueError("cursor_type is required for polling streams")
+
+        if self.rate_limit_bucket is None:
+            self.rate_limit_bucket = self.source
+
+        if self.has_webhook and self.source == "shopify" and self.hmac_header is None:
+            self.hmac_header = "X-Shopify-Hmac-Sha256"
+
+        from src.shared.schema_registry import get_schema
+
+        schema = get_schema(self.source, self.stream)
+        if schema.version != self.schema_version:
+            raise ValueError(
+                f"schema_version {self.schema_version} does not match registered schema {schema.version}"
+            )
+
+        return self
 
     @property
     def has_polling(self) -> bool:

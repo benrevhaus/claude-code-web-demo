@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from src.shared.contracts import PollerInput, PollerOutput
 from src.shared.dynamo_control import DynamoControl
-from src.shared.observability import setup_logging
+from src.shared.observability import MetricsClient, setup_logging
 from src.shared.s3_writer import S3Writer
 
 log = setup_logging("shopify-poller")
@@ -19,6 +19,7 @@ log = setup_logging("shopify-poller")
 # Injected dependencies (set by test harness or Lambda environment)
 _s3_writer: S3Writer | None = None
 _dynamo: DynamoControl | None = None
+_metrics: MetricsClient | None = None
 _shopify_client = None  # Injected for testability
 
 
@@ -34,6 +35,13 @@ def _get_dynamo() -> DynamoControl:
     if _dynamo is None:
         _dynamo = DynamoControl(table_name=os.environ.get("CONTROL_TABLE", "data-streams-control-dev"))
     return _dynamo
+
+
+def _get_metrics() -> MetricsClient:
+    global _metrics
+    if _metrics is None:
+        _metrics = MetricsClient()
+    return _metrics
 
 
 def handler(event: dict, context=None) -> dict:
@@ -92,6 +100,10 @@ def handler(event: dict, context=None) -> dict:
         run_id=inp.run_id,
         pages=inp.page_number,
     )
+
+    # Emit API health metrics (feeds dashboard widget 6 + 429 storm alarm)
+    metrics = _get_metrics()
+    metrics.emit_api_health(config.source, config.stream, response.status_code)
 
     output = PollerOutput(
         run_id=inp.run_id,

@@ -6,7 +6,7 @@ This is the interface boundary. Every Lambda's input/output is defined here.
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.shared.stream_config import StreamConfig
 
@@ -74,7 +74,7 @@ class ProcessorOutput(BaseModel):
     records_skipped: int = 0
     records_failed: int = 0
     schema_version: str = ""
-    errors: list[str] = []
+    errors: list[str] = Field(default_factory=list)
 
 
 # --- run-finalizer ---

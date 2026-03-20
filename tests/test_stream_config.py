@@ -21,6 +21,7 @@ class TestStreamConfigParsing:
         assert config.max_pages_per_run == 200
         assert config.owner == "platform"
         assert "commerce" in config.tags
+        assert config.hmac_header == "X-Shopify-Hmac-Sha256"
 
     def test_has_polling(self):
         config = load_stream_config("streams/shopify-orders.yaml")
@@ -74,3 +75,52 @@ class TestStreamConfigValidation:
                 freshness_sla_minutes=10,
                 owner="test",
             )
+
+    def test_rejects_bad_api_version_spec(self):
+        with pytest.raises(ValueError, match="apiVersion must be streams/v1"):
+            StreamConfig(
+                api_version_spec="streams/v2",
+                source="shopify",
+                stream="orders",
+                display_name="Test",
+                mode=StreamMode.GRAPHQL,
+                api_version="2024-01",
+                schema_version="shopify.order.v3",
+                idempotency_key=["order_id", "updated_at"],
+                schedule="rate(5 minutes)",
+                cursor_field="updated_at",
+                cursor_type="datetime",
+                freshness_sla_minutes=10,
+                owner="test",
+            )
+
+    def test_rejects_missing_polling_fields(self):
+        with pytest.raises(ValueError, match="schedule is required for polling streams"):
+            StreamConfig(
+                source="shopify",
+                stream="orders",
+                display_name="Test",
+                mode=StreamMode.GRAPHQL,
+                api_version="2024-01",
+                schema_version="shopify.order.v3",
+                idempotency_key=["order_id", "updated_at"],
+                freshness_sla_minutes=10,
+                owner="test",
+            )
+
+    def test_defaults_rate_limit_bucket_to_source(self):
+        config = StreamConfig(
+            source="shopify",
+            stream="orders",
+            display_name="Test",
+            mode=StreamMode.GRAPHQL,
+            api_version="2024-01",
+            schema_version="shopify.order.v3",
+            idempotency_key=["order_id", "updated_at"],
+            schedule="rate(5 minutes)",
+            cursor_field="updated_at",
+            cursor_type="datetime",
+            freshness_sla_minutes=10,
+            owner="test",
+        )
+        assert config.rate_limit_bucket == "shopify"
