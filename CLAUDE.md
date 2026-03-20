@@ -120,8 +120,7 @@ data-streams/
 
 ### SSM Parameters
 
-- `/data-streams/{env}/shopify/api_key`
-- `/data-streams/{env}/shopify/api_secret`
+- `/data-streams/{env}/shopify/access_token` (GraphQL Admin API token — used by poller)
 - `/data-streams/{env}/shopify/webhook_secret`
 - `/data-streams/{env}/postgres/connection_string`
 
@@ -213,3 +212,7 @@ If this repository is lost or needs to be recreated:
 - V6 — Step Function data flow fixes: added PrepareFinalize state (sets status="success" + normalizes field names), fixing cursor never advancing on success (finalizer checked status="success" but received "running"). Fixed Finalize reading $.cursor after HandleFetchError replaced state with $.final_cursor. Added error_message passthrough to match FinalizerInput contract. Added Aurora final_snapshot_identifier for prod (required when skip_final_snapshot=false)
 - V7 — Added .gitignore: Python bytecode, venvs, .pytest_cache, IDE files, .terraform dirs, tfstate, secrets, OS files, Lambda zips
 - V8 — Conformance fixes: fixed freshness metric dimension mismatch (alarm/dashboard used 2 dims, code emitted 3), added API health metrics to poller (http_429_count, http_5xx_count, pages_fetched — required by Terraform alarm #5 and dashboard widget #6), removed duplicate records_processed emission from finalizer (already emitted by processor)
+- V9 — Bug fixes: (1) Step Function rate limit throttle crash — UpdateAccumulator dropped fetch_result, so CheckRateLimitWait/ThrottleUntilReset referenced missing path; now carries rate_limit_reset_at as top-level field. (2) Lambda package missing streams/ dir — initializer and processor would fail at runtime. (3) Updated SSM docs for GraphQL migration (access_token replaces api_key/api_secret). (4) Safe order_number parsing from GraphQL name field. (5) EventBridge store_id now a variable (supports multi-store).
+- V10 — Cleanup: (1) Removed stale SSM parameters (api_key, api_secret) from Terraform — replaced by access_token in V9 GraphQL migration. (2) Fixed test_e2e_local.py importing duplicate ShopifyResponse from poller handler — now uses canonical ShopifyPage from shopify_client. (3) Removed duplicate ShopifyResponse class from poller handler.
+- V11 — Doc fixes: (1) Updated ADR-011 to remove deprecated api_key/api_secret SSM paths and example, now shows only access_token/webhook_secret/connection_string. (2) Updated v1-checklist SSM parameter list and secrets section to match GraphQL migration. (3) Updated adding-a-stream guide with complete SchemaEntry constructor (was missing raw_page_model, version, record_list_field, idempotency_field_map).
+- V12 — Removed stale api_key/api_secret reference from DEV_CHECKLIST.md SSM secrets section.

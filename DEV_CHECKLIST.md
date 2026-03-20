@@ -32,10 +32,9 @@ terraform -chdir=infra/environments/dev apply
 
 Required paths:
 
-- `/data-streams/dev/shopify/access_token`
+- `/data-streams/dev/shopify/access_token` (GraphQL Admin API bearer token)
+- `/data-streams/dev/shopify/webhook_secret`
 - `/data-streams/dev/postgres/connection_string`
-- `/data-streams/dev/shopify/webhook_secret` if you want webhook prep in place
-- `/data-streams/dev/shopify/api_key` and `/data-streams/dev/shopify/api_secret` can remain if you still want the placeholder paths preserved, but the poller now uses `access_token`
 
 Example:
 

@@ -68,6 +68,12 @@ variable "freshness_sla_minutes" {
   default     = 10
 }
 
+variable "store_id" {
+  description = "Store identifier for the EventBridge trigger (supports multi-store by deploying one poller per store)"
+  type        = string
+  default     = "default"
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
