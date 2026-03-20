@@ -81,15 +81,9 @@ def handler(event: dict, context=None) -> dict:
             last_record_at=inp.final_cursor,
         )
 
-    # Emit CloudWatch metrics
+    # Emit CloudWatch metrics (records_processed already emitted by processor per-page)
     metrics = _get_metrics()
     metrics.emit_freshness(config.source, config.stream, inp.store_id, freshness_lag)
-    metrics.put_metric(
-        "records_processed",
-        inp.total_records,
-        unit="Count",
-        dimensions={"source": config.source, "stream": config.stream},
-    )
 
     output = FinalizerOutput(
         run_id=inp.run_id,

@@ -61,12 +61,21 @@ class MetricsClient:
         )
 
     def emit_freshness(self, source: str, stream: str, store_id: str, lag_minutes: float):
+        # Emit with source+stream dims (matches Terraform alarm and dashboard)
         self.put_metric(
             "freshness_lag_minutes",
             lag_minutes,
             unit="None",
-            dimensions={"source": source, "stream": stream, "store_id": store_id},
+            dimensions={"source": source, "stream": stream},
         )
+
+    def emit_api_health(self, source: str, stream: str, http_status: int):
+        dims = {"source": source, "stream": stream}
+        self.put_metric("pages_fetched", 1, unit="Count", dimensions=dims)
+        if http_status == 429:
+            self.put_metric("http_429_count", 1, unit="Count", dimensions=dims)
+        if 500 <= http_status < 600:
+            self.put_metric("http_5xx_count", 1, unit="Count", dimensions=dims)
 
     def emit_records(self, source: str, stream: str, processed: int, skipped: int, failed: int):
         dims = {"source": source, "stream": stream}

@@ -74,6 +74,10 @@ def handler(event: dict, context=None) -> dict:
     stream_config = configs.get(stream_key)
     if not stream_config:
         raise ValueError(f"No stream config found for {stream_key}")
+    if stream_config.schema_version != schema.version:
+        raise ValueError(
+            f"Stream config schema_version {stream_config.schema_version} does not match registry version {schema.version}"
+        )
 
     # Read raw payload from S3
     s3 = _get_s3()
@@ -98,11 +102,7 @@ def handler(event: dict, context=None) -> dict:
             canonical_dict = canonical.model_dump(mode="json")
 
             # Compute idempotency key
-            # Map stream config key fields to canonical field names
-            key_data = {
-                "order_id": str(canonical.id),
-                "updated_at": str(canonical.updated_at),
-            }
+            key_data = schema.build_idempotency_data(canonical_dict, stream_config.idempotency_key)
             key_hash = DynamoControl.compute_idempotency_key(key_data, stream_config.idempotency_key)
 
             # Check idempotency

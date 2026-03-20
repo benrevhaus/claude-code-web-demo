@@ -207,3 +207,9 @@ If this repository is lost or needs to be recreated:
 - V0 — initial scaffold
 - V1 — CTO Vision slide deck: 16-slide AI-Native Operational Advantage presentation
 - V2 — Rewrote CLAUDE.md for the real Python/Terraform Data Streams platform
+- V3 — Terraform infrastructure: stream-platform (VPC, S3, DynamoDB, Aurora, RDS Proxy, IAM, SQS, SNS, SSM), stream-poller (Lambdas, Step Function, EventBridge, alarms), stream-webhook (API Gateway + SQS stub), dev + prod environments
+- V4 — Terraform conformance fixes: added initializer Lambda (generates run_id, creates run record, reads cursor), fixed EventBridge input to match Step Function contract, fixed webhook QueueUrl (was ARN), added error rate + 429 storm alarms, added CloudWatch dashboard with 7 widgets
+- V5 — Critical Step Function fix: Initialize ResultPath was null (discarded Lambda output), changed to "$". Fixed HandleFetchError status to "partial_failure" per spec. Fixed dashboard widget #7 to SQS queue depth per operability guide
+- V6 — Step Function data flow fixes: added PrepareFinalize state (sets status="success" + normalizes field names), fixing cursor never advancing on success (finalizer checked status="success" but received "running"). Fixed Finalize reading $.cursor after HandleFetchError replaced state with $.final_cursor. Added error_message passthrough to match FinalizerInput contract. Added Aurora final_snapshot_identifier for prod (required when skip_final_snapshot=false)
+- V7 — Added .gitignore: Python bytecode, venvs, .pytest_cache, IDE files, .terraform dirs, tfstate, secrets, OS files, Lambda zips
+- V8 — Conformance fixes: fixed freshness metric dimension mismatch (alarm/dashboard used 2 dims, code emitted 3), added API health metrics to poller (http_429_count, http_5xx_count, pages_fetched — required by Terraform alarm #5 and dashboard widget #6), removed duplicate records_processed emission from finalizer (already emitted by processor)
