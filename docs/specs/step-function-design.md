@@ -59,9 +59,9 @@ Backfill is NOT a separate state machine. It reuses the poll state machine with 
   - Create run record in DynamoDB (status: "running")
   - Load stream config from input
   - Read last cursor from DynamoDB (`CURSOR#current`)
-  - Set `page_number = 0`
+  - Set `page_number = 1`
 - **Checkpoints:** `run_id`, `start_cursor`
-- **Output:** `{ run_id, stream_config, store_id, cursor, page_number: 0, total_records: 0 }`
+- **Output:** `{ run_id, stream_config, store_id, cursor, checkpoint_cursor, page_number: 1, total_records: 0 }`
 
 #### FetchPage
 - **Type:** Task → shopify-poller Lambda
@@ -70,7 +70,7 @@ Backfill is NOT a separate state machine. It reuses the poll state machine with 
 - **Output:** PollerOutput
 - **Retry:** On 5xx errors — 3 attempts, exponential backoff (2s, 4s, 8s)
 - **Catch:** On all errors → HandleFetchError
-- **Checkpoints:** `s3_key`, `page_number`, `next_cursor` (via PollerOutput)
+- **Checkpoints:** `s3_key`, `page_number`, `next_cursor`, `checkpoint_cursor` (via PollerOutput)
 
 #### ProcessPage
 - **Type:** Task → processor Lambda
@@ -125,7 +125,8 @@ Step Functions passes state between steps via the execution input/output. We use
   "run_id": "abc-123",
   "stream_config": { ... },
   "store_id": "mystore",
-  "cursor": "2024-03-15T00:00:00Z",
+  "cursor": "{\"checkpoint\":\"2024-03-15T00:00:00Z\",\"page_cursor\":\"opaque\"}",
+  "checkpoint_cursor": "2024-03-15T00:00:00Z",
   "page_number": 3,
   "total_records": 150,
   "total_pages": 3,

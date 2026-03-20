@@ -14,6 +14,12 @@ Install dependencies:
 python3 -m pip install -e '.[dev]'
 ```
 
+Build the Lambda deployment zip before `terraform apply`:
+
+```bash
+./scripts/build_lambda_package.sh
+```
+
 Run tests:
 
 ```bash

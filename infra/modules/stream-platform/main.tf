@@ -281,8 +281,8 @@ resource "aws_iam_role" "rds_proxy" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
       Principal = { Service = "rds.amazonaws.com" }
     }]
   })
@@ -425,6 +425,18 @@ resource "aws_ssm_parameter" "shopify_api_secret" {
   tags = var.tags
 }
 
+resource "aws_ssm_parameter" "shopify_access_token" {
+  name  = "/${local.prefix}/${var.env}/shopify/access_token"
+  type  = "SecureString"
+  value = "PLACEHOLDER"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+
+  tags = var.tags
+}
+
 resource "aws_ssm_parameter" "shopify_webhook_secret" {
   name  = "/${local.prefix}/${var.env}/shopify/webhook_secret"
   type  = "SecureString"
@@ -491,9 +503,9 @@ resource "aws_iam_role_policy" "initializer" {
         Resource = ["*"]
       },
       {
-        Sid    = "Logs"
-        Effect = "Allow"
-        Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Sid      = "Logs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = ["arn:aws:logs:${local.region}:${local.account_id}:*"]
       },
       {
@@ -549,9 +561,9 @@ resource "aws_iam_role_policy" "poller" {
         Resource = ["*"]
       },
       {
-        Sid    = "Logs"
-        Effect = "Allow"
-        Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Sid      = "Logs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = ["arn:aws:logs:${local.region}:${local.account_id}:*"]
       },
       {
@@ -613,9 +625,9 @@ resource "aws_iam_role_policy" "processor" {
         Resource = ["*"]
       },
       {
-        Sid    = "Logs"
-        Effect = "Allow"
-        Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Sid      = "Logs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = ["arn:aws:logs:${local.region}:${local.account_id}:*"]
       },
       {
@@ -659,9 +671,9 @@ resource "aws_iam_role_policy" "finalizer" {
         Resource = ["*"]
       },
       {
-        Sid    = "Logs"
-        Effect = "Allow"
-        Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Sid      = "Logs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = ["arn:aws:logs:${local.region}:${local.account_id}:*"]
       },
       {

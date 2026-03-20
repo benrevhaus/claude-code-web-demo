@@ -42,7 +42,7 @@ def _get_dynamo() -> DynamoControl:
 def _get_pg() -> PgClient:
     global _pg
     if _pg is None:
-        _pg = PgClient()  # Will fail without connection — must be injected for local testing
+        _pg = PgClient.from_env()
     return _pg
 
 

@@ -28,6 +28,7 @@ class InitializerOutput(BaseModel):
     stream_config: StreamConfig
     store_id: str
     cursor: Optional[str] = None
+    checkpoint_cursor: Optional[str] = None
     page_number: int = 1
     total_records: int = 0
     total_pages: int = 0
@@ -51,6 +52,7 @@ class PollerOutput(BaseModel):
     s3_key: str
     record_count: int
     next_cursor: Optional[str] = None
+    checkpoint_cursor: Optional[str] = None
     has_more: bool
     http_status: int
     rate_limit_remaining: Optional[int] = None

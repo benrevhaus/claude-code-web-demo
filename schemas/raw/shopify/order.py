@@ -4,10 +4,23 @@ This model accepts the full vendor payload without strict validation.
 extra="allow" ensures we never fail on unknown fields from Shopify.
 """
 
-from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
+
+
+def _gid_to_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        tail = value.rsplit("/", 1)[-1]
+        try:
+            return int(tail)
+        except ValueError:
+            return None
+    return None
 
 
 class ShopifyMoneyRaw(BaseModel):
@@ -32,6 +45,16 @@ class ShopifyAddressRaw(BaseModel):
     zip: Optional[str] = None
     phone: Optional[str] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_graphql_address(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        if "country_code" not in normalized and "countryCodeV2" in normalized:
+            normalized["country_code"] = normalized.get("countryCodeV2")
+        return normalized
+
 
 class ShopifyLineItemRaw(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -44,6 +67,26 @@ class ShopifyLineItemRaw(BaseModel):
     variant_id: Optional[int] = None
     product_id: Optional[int] = None
     vendor: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_graphql_line_item(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        normalized = dict(data)
+        variant = normalized.get("variant") or {}
+        product = variant.get("product") or {}
+        original_price = normalized.get("originalUnitPriceSet") or {}
+        shop_money = original_price.get("shopMoney") or {}
+
+        normalized["id"] = _gid_to_int(normalized.get("id")) or normalized.get("id")
+        normalized["title"] = normalized.get("title") or normalized.get("name")
+        normalized["variant_id"] = _gid_to_int(normalized.get("variant_id")) or _gid_to_int(variant.get("id"))
+        normalized["product_id"] = _gid_to_int(normalized.get("product_id")) or _gid_to_int(product.get("id"))
+        if normalized.get("price") is None:
+            normalized["price"] = shop_money.get("amount")
+        return normalized
 
 
 class ShopifyOrderRaw(BaseModel):
@@ -73,6 +116,44 @@ class ShopifyOrderRaw(BaseModel):
     billing_address: Optional[ShopifyAddressRaw] = None
     customer: Optional[dict[str, Any]] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_graphql_order(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        if "currentTotalPriceSet" not in data and "displayFinancialStatus" not in data and "lineItems" not in data:
+            return data
+
+        normalized = dict(data)
+        total_price_set = normalized.get("currentTotalPriceSet") or {}
+        shop_money = total_price_set.get("shopMoney") or {}
+        line_items = normalized.get("lineItems") or {}
+        shipping_address = normalized.get("shippingAddress")
+        billing_address = normalized.get("billingAddress")
+
+        normalized["id"] = _gid_to_int(normalized.get("id")) or normalized.get("id")
+        if normalized.get("order_number") is None and normalized.get("name"):
+            normalized["order_number"] = str(normalized["name"]).lstrip("#")
+        normalized["financial_status"] = normalized.get("financial_status") or normalized.get("displayFinancialStatus")
+        normalized["fulfillment_status"] = normalized.get("fulfillment_status") or normalized.get("displayFulfillmentStatus")
+        normalized["total_price"] = normalized.get("total_price") or shop_money.get("amount")
+        normalized["currency"] = normalized.get("currency") or shop_money.get("currencyCode")
+        normalized["created_at"] = normalized.get("created_at") or normalized.get("createdAt")
+        normalized["updated_at"] = normalized.get("updated_at") or normalized.get("updatedAt")
+        normalized["cancelled_at"] = normalized.get("cancelled_at") or normalized.get("cancelledAt")
+        normalized["closed_at"] = normalized.get("closed_at") or normalized.get("closedAt")
+        normalized["shipping_address"] = normalized.get("shipping_address") or shipping_address
+        normalized["billing_address"] = normalized.get("billing_address") or billing_address
+
+        if isinstance(normalized.get("tags"), list):
+            normalized["tags"] = ", ".join(normalized["tags"])
+
+        if isinstance(line_items, dict) and "edges" in line_items:
+            normalized["line_items"] = [edge.get("node", {}) for edge in line_items.get("edges", [])]
+
+        return normalized
+
 
 class ShopifyOrdersPageRaw(BaseModel):
     """A page of orders from the Shopify API (REST or parsed from GraphQL)."""
@@ -80,3 +161,18 @@ class ShopifyOrdersPageRaw(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     orders: list[ShopifyOrderRaw] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_graphql_page(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if "orders" in data:
+            return data
+
+        orders = (
+            data.get("data", {})
+            .get("orders", {})
+            .get("edges", [])
+        )
+        return {"orders": [edge.get("node", {}) for edge in orders]}

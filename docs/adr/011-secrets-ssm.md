@@ -21,6 +21,7 @@ Lambda functions need access to Shopify API keys, Postgres credentials, webhook 
 # Examples:
 /data-streams/prod/shopify/api_key
 /data-streams/prod/shopify/api_secret
+/data-streams/prod/shopify/access_token
 /data-streams/prod/shopify/webhook_secret
 /data-streams/prod/postgres/connection_string
 ```
