@@ -25,7 +25,7 @@ locals {
 # -----------------------------------------------------------------------------
 
 resource "aws_lambda_function" "initializer" {
-  function_name = "${local.prefix}-initializer-${var.env}"
+  function_name = "${local.prefix}-initializer-${local.stream_slug}-${var.env}"
   role          = var.initializer_role_arn
   handler       = "src.lambdas.initializer.handler.handler"
   runtime       = "python3.12"
@@ -55,7 +55,7 @@ resource "aws_lambda_function" "initializer" {
 }
 
 resource "aws_lambda_function" "poller" {
-  function_name = "${local.prefix}-poller-${var.env}"
+  function_name = "${local.prefix}-poller-${local.stream_slug}-${var.env}"
   role          = var.poller_role_arn
   handler       = "src.lambdas.poller.handler.handler"
   runtime       = "python3.12"
@@ -86,7 +86,7 @@ resource "aws_lambda_function" "poller" {
 }
 
 resource "aws_lambda_function" "processor" {
-  function_name                  = "${local.prefix}-processor-${var.env}"
+  function_name                  = "${local.prefix}-processor-${local.stream_slug}-${var.env}"
   role                           = var.processor_role_arn
   handler                        = "src.lambdas.processor.handler.handler"
   runtime                        = "python3.12"
@@ -118,7 +118,7 @@ resource "aws_lambda_function" "processor" {
 }
 
 resource "aws_lambda_function" "finalizer" {
-  function_name = "${local.prefix}-finalizer-${var.env}"
+  function_name = "${local.prefix}-finalizer-${local.stream_slug}-${var.env}"
   role          = var.finalizer_role_arn
   handler       = "src.lambdas.finalizer.handler.handler"
   runtime       = "python3.12"
@@ -335,18 +335,18 @@ resource "aws_sfn_state_machine" "poll" {
         Type    = "Pass"
         Comment = "Update running totals and cursor for next iteration"
         Parameters = {
-          "run_id.$"                 = "$.run_id"
-          "stream_config.$"          = "$.stream_config"
-          "store_id.$"               = "$.store_id"
-          "cursor.$"                 = "$.fetch_result.next_cursor"
-          "checkpoint_cursor.$"      = "$.fetch_result.checkpoint_cursor"
-          "page_number.$"            = "States.MathAdd($.page_number, 1)"
-          "total_records.$"          = "States.MathAdd($.total_records, $.fetch_result.record_count)"
-          "total_pages.$"            = "States.MathAdd($.total_pages, 1)"
-          "has_more.$"               = "$.fetch_result.has_more"
-          "max_pages.$"              = "$.max_pages"
-          "rate_limit_reset_at.$"    = "$.fetch_result.rate_limit_reset_at"
-          "status"                   = "success"
+          "run_id.$"              = "$.run_id"
+          "stream_config.$"       = "$.stream_config"
+          "store_id.$"            = "$.store_id"
+          "cursor.$"              = "$.fetch_result.next_cursor"
+          "checkpoint_cursor.$"   = "$.fetch_result.checkpoint_cursor"
+          "page_number.$"         = "States.MathAdd($.page_number, 1)"
+          "total_records.$"       = "States.MathAdd($.total_records, $.fetch_result.record_count)"
+          "total_pages.$"         = "States.MathAdd($.total_pages, 1)"
+          "has_more.$"            = "$.fetch_result.has_more"
+          "max_pages.$"           = "$.max_pages"
+          "rate_limit_reset_at.$" = "$.fetch_result.rate_limit_reset_at"
+          "status"                = "success"
         }
         Next = "CheckMore"
       }
@@ -355,18 +355,18 @@ resource "aws_sfn_state_machine" "poll" {
         Type    = "Pass"
         Comment = "Update running totals after a process error and preserve partial failure status"
         Parameters = {
-          "run_id.$"                 = "$.run_id"
-          "stream_config.$"          = "$.stream_config"
-          "store_id.$"               = "$.store_id"
-          "cursor.$"                 = "$.fetch_result.next_cursor"
-          "checkpoint_cursor.$"      = "$.fetch_result.checkpoint_cursor"
-          "page_number.$"            = "States.MathAdd($.page_number, 1)"
-          "total_records.$"          = "States.MathAdd($.total_records, $.fetch_result.record_count)"
-          "total_pages.$"            = "States.MathAdd($.total_pages, 1)"
-          "has_more.$"               = "$.fetch_result.has_more"
-          "max_pages.$"              = "$.max_pages"
-          "rate_limit_reset_at.$"    = "$.fetch_result.rate_limit_reset_at"
-          "status"                   = "partial_failure"
+          "run_id.$"              = "$.run_id"
+          "stream_config.$"       = "$.stream_config"
+          "store_id.$"            = "$.store_id"
+          "cursor.$"              = "$.fetch_result.next_cursor"
+          "checkpoint_cursor.$"   = "$.fetch_result.checkpoint_cursor"
+          "page_number.$"         = "States.MathAdd($.page_number, 1)"
+          "total_records.$"       = "States.MathAdd($.total_records, $.fetch_result.record_count)"
+          "total_pages.$"         = "States.MathAdd($.total_pages, 1)"
+          "has_more.$"            = "$.fetch_result.has_more"
+          "max_pages.$"           = "$.max_pages"
+          "rate_limit_reset_at.$" = "$.fetch_result.rate_limit_reset_at"
+          "status"                = "partial_failure"
         }
         Next = "CheckMore"
       }
@@ -536,7 +536,7 @@ resource "aws_cloudwatch_event_target" "step_function" {
     source             = var.source_name
     stream             = var.stream_name
     store_id           = var.store_id
-    max_pages          = 200
+    max_pages          = var.max_pages_default
     cursor_override    = null
     max_pages_override = null
   })

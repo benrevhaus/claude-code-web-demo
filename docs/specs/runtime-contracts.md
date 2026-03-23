@@ -58,9 +58,9 @@ class InitializerOutput(BaseModel):
 
 ---
 
-## shopify-poller
+## poller
 
-**Purpose:** Fetch one page from Shopify API, write raw to S3, return cursor.
+**Purpose:** Fetch one page from a provider API, write raw to S3, return cursor.
 **Invoked by:** Step Functions task state.
 
 ### Input
@@ -69,7 +69,7 @@ class InitializerOutput(BaseModel):
 class PollerInput(BaseModel):
     run_id: str                    # UUID for this run
     stream_config: StreamConfig    # Parsed stream YAML (full object)
-    store_id: str                  # Shopify store identifier
+    store_id: str                  # Provider tenant/store identifier
     cursor: Optional[str]          # None on first page
     page_number: int               # 1-indexed, for logging
 ```
@@ -91,7 +91,7 @@ class PollerOutput(BaseModel):
 
 ### Behavior rules
 
-1. Calls Shopify GraphQL Admin API for one page using `cursor` from input.
+1. Calls the provider API for one page using `cursor` from input.
 2. Writes raw response body to S3 (full JSON, gzipped) using standard key pattern.
 3. Updates DynamoDB run record with page count.
 4. Returns both:
@@ -101,6 +101,11 @@ class PollerOutput(BaseModel):
 6. On 429: Returns output with `has_more=True` and `rate_limit_reset_at` populated. Does not retry.
 7. On 5xx: Raises exception. Step Function retry policy handles retries.
 8. On 2xx with empty results: Returns `has_more=False`, `record_count=0`.
+
+### Provider-specific notes
+
+- Shopify uses an encoded cursor state containing a durable timestamp checkpoint and provider page cursor.
+- Gorgias tickets use `updated_datetime:asc` for an initial historical crawl, then `updated_datetime:desc` once a checkpoint exists, with the durable checkpoint tracked separately from the provider pagination cursor.
 
 ### What this Lambda does NOT do
 

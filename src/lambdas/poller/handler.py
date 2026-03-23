@@ -1,6 +1,6 @@
-"""shopify-poller Lambda handler.
+"""Poller Lambda handler.
 
-Fetches one page from Shopify API, writes raw to S3, returns cursor info.
+Fetches one page from a provider API, writes raw to S3, returns cursor info.
 This handler is THIN — it delegates to shared libs for all logic.
 """
 
@@ -11,17 +11,19 @@ from datetime import datetime, timezone
 
 from src.shared.contracts import PollerInput, PollerOutput
 from src.shared.dynamo_control import DynamoControl
+from src.shared.gorgias_client import GorgiasTicketsClient
 from src.shared.observability import MetricsClient, setup_logging
 from src.shared.s3_writer import S3Writer
 from src.shared.shopify_client import ShopifyOrdersClient
 
-log = setup_logging("shopify-poller")
+log = setup_logging("poller")
 
 # Injected dependencies (set by test harness or Lambda environment)
 _s3_writer: S3Writer | None = None
 _dynamo: DynamoControl | None = None
 _metrics: MetricsClient | None = None
 _shopify_client = None  # Injected for testability
+_gorgias_client = None  # Injected for testability
 
 
 def _get_s3_writer() -> S3Writer:
@@ -60,9 +62,9 @@ def handler(event: dict, context=None) -> dict:
         cursor=inp.cursor,
     )
 
-    # Fetch one page from Shopify
-    shopify = _shopify_client or _default_shopify_client()
-    response = shopify.fetch_page(
+    # Fetch one page from the provider
+    client = _get_provider_client(config.source)
+    response = client.fetch_page(
         store_id=inp.store_id,
         endpoint=config.endpoint or config.stream,
         api_version=config.api_version,
@@ -131,3 +133,15 @@ def handler(event: dict, context=None) -> dict:
 
 def _default_shopify_client():
     return ShopifyOrdersClient()
+
+
+def _default_gorgias_client():
+    return GorgiasTicketsClient()
+
+
+def _get_provider_client(source: str):
+    if source == "shopify":
+        return _shopify_client or _default_shopify_client()
+    if source == "gorgias":
+        return _gorgias_client or _default_gorgias_client()
+    raise ValueError(f"Unsupported poller source: {source}")

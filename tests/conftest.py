@@ -21,3 +21,12 @@ def load_all_order_fixtures() -> list[dict]:
         with open(p) as f:
             orders.append(json.load(f))
     return orders
+
+
+def load_all_gorgias_ticket_fixtures() -> list[dict]:
+    """Load all Gorgias ticket fixtures."""
+    tickets = []
+    for p in sorted((FIXTURES_DIR / "gorgias" / "tickets").glob("ticket_*.json")):
+        with open(p) as f:
+            tickets.append(json.load(f))
+    return tickets

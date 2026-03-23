@@ -11,7 +11,7 @@ Two state machines serve the platform:
 1. **Incremental Poll** — runs on schedule, fetches new/updated records
 2. **Replay** — runs on demand, reprocesses from S3 (Phase 2)
 
-Backfill is NOT a separate state machine. It reuses the poll state machine with a manually set start cursor.
+Backfill is NOT a separate state machine. It reuses the poll state machine, but the exact override semantics are provider-specific.
 
 ---
 
@@ -64,7 +64,7 @@ Backfill is NOT a separate state machine. It reuses the poll state machine with 
 - **Output:** `{ run_id, stream_config, store_id, cursor, checkpoint_cursor, page_number: 1, total_records: 0 }`
 
 #### FetchPage
-- **Type:** Task → shopify-poller Lambda
+- **Type:** Task → provider-specific poller Lambda
 - **Owns:** Fetch one page from vendor API. Write raw to S3.
 - **Input:** PollerInput (from state accumulator)
 - **Output:** PollerOutput
@@ -182,18 +182,24 @@ The Map state is purpose-built for iterating over a list. It handles:
 
 **Backfill reuses the incremental poll state machine.** No separate state machine.
 
-To backfill:
+For providers with a durable timestamp filter or an encoded durable cursor state, backfill can use override input:
 1. Start the poll Step Function with override input:
    ```json
    {
      "cursor_override": "2020-01-01T00:00:00Z",
      "max_pages_override": 5000,
-     "timeout_override": "PT4H"
+     "max_pages": 5000
    }
    ```
 2. The Initialize state uses `cursor_override` instead of reading from DynamoDB.
 3. The poll runs as normal, paginating through historical data.
 4. On completion, the cursor checkpoint is updated to the last fetched record.
+
+For Gorgias tickets specifically:
+
+1. **Full historical import:** start with no cursor and a high `max_pages_override`. The client uses `order_by=updated_datetime:asc` and walks from oldest to newest.
+2. **Steady-state incremental sync:** once a checkpoint exists, the client uses `order_by=updated_datetime:desc` and stops when it crosses the saved checkpoint.
+3. **Targeted partial backfill:** `cursor_override` can still be used as a stop boundary for descending scans, but it is not required for the initial full crawl.
 
 **When to consider a dedicated backfill mechanism (Phase 3+):**
 - Backfills regularly exceed 5000 pages

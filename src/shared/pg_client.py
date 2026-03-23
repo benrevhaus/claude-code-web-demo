@@ -139,6 +139,97 @@ class PgClient:
         with self._conn.cursor() as cur:
             cur.execute(sql, params)
 
+    def upsert_ticket(self, ticket: BaseModel, s3_key: str, schema_version: str, run_id: Optional[str] = None) -> bool:
+        """Upsert a canonical ticket to gorgias.tickets. Returns True if row was inserted/updated."""
+        self._ensure_connection()
+        data = ticket.model_dump()
+
+        sql = """
+            INSERT INTO gorgias.tickets (
+                id, store_id, external_id, status, subject, channel,
+                created_datetime, updated_datetime, closed_datetime, opened_datetime,
+                last_message_datetime, last_received_message_datetime, spam,
+                via, customer, assignee_user, tags,
+                raw_s3_key, schema_version, run_id
+            ) VALUES (
+                %(id)s, %(store_id)s, %(external_id)s, %(status)s, %(subject)s, %(channel)s,
+                %(created_datetime)s, %(updated_datetime)s, %(closed_datetime)s, %(opened_datetime)s,
+                %(last_message_datetime)s, %(last_received_message_datetime)s, %(spam)s,
+                %(via)s, %(customer)s, %(assignee_user)s, %(tags)s,
+                %(raw_s3_key)s, %(schema_version)s, %(run_id)s
+            )
+            ON CONFLICT (id, store_id) DO UPDATE SET
+                external_id = EXCLUDED.external_id,
+                status = EXCLUDED.status,
+                subject = EXCLUDED.subject,
+                channel = EXCLUDED.channel,
+                created_datetime = EXCLUDED.created_datetime,
+                updated_datetime = EXCLUDED.updated_datetime,
+                closed_datetime = EXCLUDED.closed_datetime,
+                opened_datetime = EXCLUDED.opened_datetime,
+                last_message_datetime = EXCLUDED.last_message_datetime,
+                last_received_message_datetime = EXCLUDED.last_received_message_datetime,
+                spam = EXCLUDED.spam,
+                via = EXCLUDED.via,
+                customer = EXCLUDED.customer,
+                assignee_user = EXCLUDED.assignee_user,
+                tags = EXCLUDED.tags,
+                raw_s3_key = EXCLUDED.raw_s3_key,
+                schema_version = EXCLUDED.schema_version,
+                ingested_at = NOW(),
+                run_id = EXCLUDED.run_id
+            WHERE gorgias.tickets.updated_datetime < EXCLUDED.updated_datetime
+        """
+
+        params = {
+            "id": data["id"],
+            "store_id": data["store_id"],
+            "external_id": data.get("external_id"),
+            "status": data.get("status"),
+            "subject": data.get("subject"),
+            "channel": data.get("channel"),
+            "created_datetime": data.get("created_datetime"),
+            "updated_datetime": data.get("updated_datetime"),
+            "closed_datetime": data.get("closed_datetime"),
+            "opened_datetime": data.get("opened_datetime"),
+            "last_message_datetime": data.get("last_message_datetime"),
+            "last_received_message_datetime": data.get("last_received_message_datetime"),
+            "spam": data.get("spam"),
+            "via": json.dumps(data.get("via")) if data.get("via") else None,
+            "customer": json.dumps(data.get("customer")) if data.get("customer") else None,
+            "assignee_user": json.dumps(data.get("assignee_user")) if data.get("assignee_user") else None,
+            "tags": data.get("tags"),
+            "raw_s3_key": s3_key,
+            "schema_version": schema_version,
+            "run_id": run_id,
+        }
+
+        with self._conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.rowcount > 0
+
+    def insert_ticket_history(self, ticket: BaseModel, run_id: Optional[str] = None) -> None:
+        """Append a history snapshot for a ticket."""
+        self._ensure_connection()
+        data = ticket.model_dump()
+
+        sql = """
+            INSERT INTO gorgias.tickets_history (ticket_id, store_id, snapshot, changed_at, run_id)
+            VALUES (%(ticket_id)s, %(store_id)s, %(snapshot)s, %(changed_at)s, %(run_id)s)
+            ON CONFLICT (ticket_id, store_id, changed_at) DO NOTHING
+        """
+
+        params = {
+            "ticket_id": data["id"],
+            "store_id": data["store_id"],
+            "snapshot": json.dumps(data, default=str),
+            "changed_at": data["updated_datetime"],
+            "run_id": run_id,
+        }
+
+        with self._conn.cursor() as cur:
+            cur.execute(sql, params)
+
     def commit(self):
         self._ensure_connection()
         self._conn.commit()
