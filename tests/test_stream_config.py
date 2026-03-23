@@ -23,6 +23,21 @@ class TestStreamConfigParsing:
         assert "commerce" in config.tags
         assert config.hmac_header == "X-Shopify-Hmac-Sha256"
 
+    def test_load_gorgias_tickets_yaml(self):
+        config = load_stream_config("streams/gorgias-tickets.yaml")
+        assert config.source == "gorgias"
+        assert config.stream == "tickets"
+        assert config.mode == StreamMode.REST
+        assert config.api_version == "v1"
+        assert config.endpoint == "tickets"
+        assert config.schedule == "rate(15 minutes)"
+        assert config.schema_version == "gorgias.ticket.v1"
+        assert config.idempotency_key == ["ticket_id", "updated_datetime"]
+        assert config.cursor_field == "updated_datetime"
+        assert config.page_size == 100
+        assert config.max_pages_per_run == 500
+        assert config.rate_limit_bucket == "gorgias"
+
     def test_has_polling(self):
         config = load_stream_config("streams/shopify-orders.yaml")
         assert config.has_polling is True

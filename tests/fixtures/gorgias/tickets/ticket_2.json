@@ -1,0 +1,29 @@
+{
+  "id": 1002,
+  "external_id": null,
+  "status": "closed",
+  "subject": "Refund request",
+  "channel": {
+    "name": "chat"
+  },
+  "created_datetime": "2026-03-02T08:00:00Z",
+  "updated_datetime": "2026-03-02T09:45:00Z",
+  "closed_datetime": "2026-03-02T09:45:00Z",
+  "opened_datetime": "2026-03-02T08:00:00Z",
+  "last_message_datetime": "2026-03-02T09:40:00Z",
+  "last_received_message_datetime": "2026-03-02T09:00:00Z",
+  "spam": false,
+  "via": {
+    "channel": "chat",
+    "source": "widget"
+  },
+  "customer": {
+    "id": 502,
+    "email": "bob@example.com",
+    "name": "Bob"
+  },
+  "assignee_user": null,
+  "tags": [
+    "refund"
+  ]
+}

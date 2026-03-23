@@ -1,0 +1,31 @@
+{
+  "id": 1001,
+  "external_id": "shopify-ord-1042",
+  "status": "open",
+  "subject": "Where is my order?",
+  "channel": "email",
+  "created_datetime": "2026-03-01T10:00:00Z",
+  "updated_datetime": "2026-03-01T10:15:00Z",
+  "opened_datetime": "2026-03-01T10:00:00Z",
+  "last_message_datetime": "2026-03-01T10:15:00Z",
+  "last_received_message_datetime": "2026-03-01T10:14:00Z",
+  "spam": false,
+  "via": {
+    "channel": "email",
+    "source": "customer"
+  },
+  "customer": {
+    "id": 501,
+    "email": "alice@example.com",
+    "name": "Alice"
+  },
+  "assignee_user": {
+    "id": 42,
+    "email": "agent@example.com",
+    "name": "Support Agent"
+  },
+  "tags": [
+    {"id": 1, "name": "vip"},
+    {"id": 2, "name": "shipping"}
+  ]
+}

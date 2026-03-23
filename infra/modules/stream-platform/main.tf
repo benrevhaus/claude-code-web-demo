@@ -425,6 +425,30 @@ resource "aws_ssm_parameter" "shopify_webhook_secret" {
   tags = var.tags
 }
 
+resource "aws_ssm_parameter" "gorgias_email" {
+  name  = "/${local.prefix}/${var.env}/gorgias/email"
+  type  = "SecureString"
+  value = "PLACEHOLDER"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+
+  tags = var.tags
+}
+
+resource "aws_ssm_parameter" "gorgias_api_key" {
+  name  = "/${local.prefix}/${var.env}/gorgias/api_key"
+  type  = "SecureString"
+  value = "PLACEHOLDER"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+
+  tags = var.tags
+}
+
 resource "aws_ssm_parameter" "postgres_connection_string" {
   name  = "/${local.prefix}/${var.env}/postgres/connection_string"
   type  = "SecureString"

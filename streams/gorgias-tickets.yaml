@@ -1,0 +1,32 @@
+apiVersion: streams/v1
+
+source: gorgias
+stream: tickets
+display_name: Gorgias Tickets
+
+mode: rest
+api_version: "v1"
+endpoint: tickets
+
+schedule: rate(15 minutes)
+backfill_enabled: true
+
+schema_version: gorgias.ticket.v1
+normalizes_to: support_ticket
+
+idempotency_key:
+  - ticket_id
+  - updated_datetime
+cursor_field: updated_datetime
+cursor_type: datetime
+
+freshness_sla_minutes: 30
+max_pages_per_run: 500
+page_size: 100
+rate_limit_bucket: gorgias
+
+owner: platform
+tags:
+  - support
+  - gorgias
+  - tickets

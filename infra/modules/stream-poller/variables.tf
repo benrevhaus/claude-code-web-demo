@@ -43,6 +43,12 @@ variable "processor_reserved_concurrency" {
   default     = 5
 }
 
+variable "max_pages_default" {
+  description = "Default max_pages value passed by EventBridge to the Step Function"
+  type        = number
+  default     = 200
+}
+
 variable "lambda_package_file" {
   description = "Path to the built Lambda deployment zip"
   type        = string

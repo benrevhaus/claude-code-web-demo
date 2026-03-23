@@ -64,6 +64,41 @@ module "shopify_orders_poller" {
   schedule_expression            = "rate(5 minutes)"
   freshness_sla_minutes          = 10
   processor_reserved_concurrency = 5
+  max_pages_default              = 200
+  lambda_package_file            = "${path.root}/../../../dist/lambda/data-streams.zip"
+
+  raw_bucket_name             = module.platform.raw_bucket_name
+  control_table_name          = module.platform.control_table_name
+  initializer_role_arn        = module.platform.initializer_role_arn
+  poller_role_arn             = module.platform.poller_role_arn
+  processor_role_arn          = module.platform.processor_role_arn
+  finalizer_role_arn          = module.platform.finalizer_role_arn
+  vpc_subnet_ids              = module.platform.private_subnet_ids
+  vpc_security_group_ids      = [module.platform.lambda_security_group_id]
+  sns_alerts_arn              = module.platform.sns_alerts_arn
+  step_function_log_group_arn = module.platform.step_function_log_group_arn
+  sqs_process_queue_name      = module.platform.sqs_process_queue_name
+  sqs_dlq_name                = module.platform.sqs_dlq_name
+
+  tags = {
+    Project     = "data-streams"
+    Environment = local.env
+  }
+}
+
+# --- Gorgias Tickets stream (polling) ---
+
+module "gorgias_tickets_poller" {
+  source = "../../modules/stream-poller"
+
+  env                            = local.env
+  source_name                    = "gorgias"
+  stream_name                    = "tickets"
+  store_id                       = "vitalityextracts"
+  schedule_expression            = "rate(15 minutes)"
+  freshness_sla_minutes          = 30
+  processor_reserved_concurrency = 5
+  max_pages_default              = 500
   lambda_package_file            = "${path.root}/../../../dist/lambda/data-streams.zip"
 
   raw_bucket_name             = module.platform.raw_bucket_name
@@ -126,6 +161,10 @@ output "rds_proxy_endpoint" {
 
 output "step_function_arn" {
   value = module.shopify_orders_poller.step_function_arn
+}
+
+output "gorgias_step_function_arn" {
+  value = module.gorgias_tickets_poller.step_function_arn
 }
 
 output "webhook_endpoint" {

@@ -111,10 +111,10 @@ def handler(event: dict, context=None) -> dict:
                 continue
 
             # Upsert to Postgres
-            updated = pg.upsert_order(canonical, inp.s3_key, schema.version, inp.run_id)
+            updated = getattr(pg, schema.pg_upsert_method)(canonical, inp.s3_key, schema.version, inp.run_id)
 
             if updated:
-                pg.insert_order_history(canonical, inp.run_id)
+                getattr(pg, schema.pg_history_method)(canonical, inp.run_id)
 
             pg.commit()
 
