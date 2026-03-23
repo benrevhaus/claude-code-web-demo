@@ -44,3 +44,6 @@ crash.log
 
 # Lambda packaging
 *.zip
+
+# dual_ai_checker run artifacts
+scripts/.dual_ai_rounds/
