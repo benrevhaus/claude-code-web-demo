@@ -1,7 +1,9 @@
 # V1 Launch Checklist
 
-**Date:** 2026-03-17
+**Date:** 2026-03-17 (updated 2026-03-24)
 **Stream:** Shopify Orders (golden path)
+
+> **Note:** Per [ADR-021](../adr/021-simplify-to-single-lambda-mvp.md), the MVP ships as Phase 0 (single-Lambda architecture). The full checklist below remains the target for Phase 1 hardening. See [Phase 0 checklist](phases.md#phase-0-ship-the-mvp-solo-1-week) for the simplified launch criteria.
 
 ---
 

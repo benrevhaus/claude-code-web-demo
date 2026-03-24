@@ -10,6 +10,35 @@ This document is as important as the architecture itself. It captures explicit d
 
 ---
 
+## Intentionally Dormant (Built But Deferred to Phase 1+)
+
+> **See [ADR-021](../adr/021-simplify-to-single-lambda-mvp.md) for full rationale.**
+
+The following components are **fully implemented and tested** in this repository but are not deployed in the Phase 0 MVP. They remain in the codebase as the target architecture and will be adopted individually when their operational trigger is hit.
+
+| Dormant Component | Location | Adopt When |
+|-------------------|----------|------------|
+| Step Function orchestration | `infra/modules/stream-poller/` | Lambda hits 15-min timeout on backfills |
+| DynamoDB control plane (runs, cursors, freshness) | `src/shared/dynamo_control.py` | Run-level audit trail required |
+| DynamoDB idempotency layer | `src/shared/dynamo_control.py` | Postgres UNIQUE constraint insufficient |
+| 4-Lambda architecture (initializer, poller, processor, finalizer) | `src/lambdas/*/` | Step Function adopted (they go together) |
+| Inter-Lambda contracts | `src/shared/contracts.py` | 4-Lambda architecture adopted |
+| VPC + 4 VPC endpoints | `infra/modules/stream-platform/` | Egress costs exceed endpoint costs |
+| RDS Proxy | `infra/modules/stream-platform/` | Connection pooling errors under concurrency |
+| CloudWatch dashboard (7 widgets) + 9 alarms | `infra/modules/stream-poller/` | On-call rotation needs dashboards |
+| Parameterized Terraform modules | `infra/modules/` | 5+ streams with shared infra |
+| Schema registry (routing table) | `src/shared/schema_registry.py` | 5+ schemas, direct imports become unwieldy |
+
+**These are not technical debt.** They are prepaid engineering that will be activated when reality demands it. Do not delete them. Do not refactor them "to match MVP." They are correct as written.
+
+---
+
+## Not Building in Phase 0 (MVP)
+
+Everything in the "Not Building in Phase 1" section below still applies. Additionally, Phase 0 intentionally omits the DynamoDB control plane, Step Function orchestration, VPC networking, and multi-Lambda coordination. See the dormant components table above.
+
+---
+
 ## Not Building in Phase 1
 
 ### Provider-Agnostic Normalization Layer
