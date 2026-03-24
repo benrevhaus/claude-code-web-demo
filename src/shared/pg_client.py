@@ -230,6 +230,55 @@ class PgClient:
         with self._conn.cursor() as cur:
             cur.execute(sql, params)
 
+    # ── MVP cursor storage (ADR-022) ──────────────────────────────────────
+
+    def get_stream_cursor(self, source: str, stream: str, store_id: str) -> str | None:
+        """Read current cursor value from control.stream_cursors."""
+        self._ensure_connection()
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT cursor_value FROM control.stream_cursors "
+                "WHERE source = %s AND stream = %s AND store_id = %s",
+                (source, stream, store_id),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+
+    def save_stream_cursor(
+        self,
+        source: str,
+        stream: str,
+        store_id: str,
+        cursor_value: str | None,
+        run_id: str,
+        status: str = "success",
+        pages: int = 0,
+        records: int = 0,
+    ) -> None:
+        """Upsert cursor + run metadata after a completed run."""
+        self._ensure_connection()
+        with self._conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO control.stream_cursors
+                       (source, stream, store_id, cursor_value, run_id,
+                        last_status, last_run_at, pages_total, records_total)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s, %s)
+                ON CONFLICT (source, stream, store_id) DO UPDATE SET
+                    cursor_value  = EXCLUDED.cursor_value,
+                    run_id        = EXCLUDED.run_id,
+                    updated_at    = NOW(),
+                    last_status   = EXCLUDED.last_status,
+                    last_run_at   = NOW(),
+                    pages_total   = EXCLUDED.pages_total,
+                    records_total = EXCLUDED.records_total
+                """,
+                (source, stream, store_id, cursor_value, run_id, status, pages, records),
+            )
+        self._conn.commit()
+
+    # ── Transaction control ─────────────────────────────────────────────
+
     def commit(self):
         self._ensure_connection()
         self._conn.commit()

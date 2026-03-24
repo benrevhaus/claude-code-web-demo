@@ -4,77 +4,104 @@
 
 ---
 
-## Phase 1: Prove the Pattern (Solo, ~3-4 weeks)
+## Phase 0: Ship the MVP (Solo, ~1 week)
+
+> **See [ADR-021](../adr/021-simplify-to-single-lambda-mvp.md) for the full rationale.**
 
 ### Goal
-One golden-path stream (Shopify Orders) running end-to-end in production. Polling, processing, observability, and manual replay all work.
+Shopify Orders and Gorgias Tickets flowing into Postgres **this week**. Single-Lambda architecture — one Lambda per stream, triggered by EventBridge, no Step Function, no DynamoDB control plane, no VPC. Maximum data integrity, minimum moving parts.
 
 ### Build (in order)
 
-1. **Repo structure + Terraform skeleton**
-   - S3 bucket, DynamoDB table, Aurora Serverless v2, IAM roles, VPC/subnets
+1. **Minimal Terraform** (flat file, not modules)
+   - S3 bucket (raw archival, SSE-S3, versioning)
+   - Aurora Serverless v2 (public endpoint, SSL + IAM auth)
+   - 1 Lambda per stream + 1 IAM role per stream
+   - EventBridge rules (5 min Shopify, 15 min Gorgias)
    - SSM parameter paths for secrets
-   - SNS topic for alerts
+   - 1 SNS topic + Lambda error alarm
 
-2. **Shared libraries**
-   - `src/shared/s3_writer.py` — write raw + gzip + return key
-   - `src/shared/dynamo_control.py` — create run, update cursor, check idempotency, record completion
-   - `src/shared/pg_client.py` — connection pooling, upsert helper
-   - `src/shared/stream_config.py` — parse YAML, return typed StreamConfig
-   - `src/shared/observability.py` — structured logging setup, metric emission
+2. **Single Lambda handler per stream**
+   - Fetch all pages in a loop (reuse existing `shopify_client.py`, `gorgias_client.py`)
+   - Write each page raw to S3 (reuse `s3_writer.py`)
+   - Transform via existing Pydantic schemas (reuse `schemas/`)
+   - Upsert to Postgres (reuse `pg_client.py`)
+   - Save cursor to Postgres `stream_cursors` table
+   - Structured logging via structlog (reuse `observability.py`)
 
-3. **Pydantic schemas**
-   - `schemas/raw/shopify/order.py` — raw Shopify order model (permissive)
-   - `schemas/canonical/shopify/order_v3.py` — source canonical model (strict) + transform function
+3. **Postgres migration**
+   - `stream_cursors` table (source, stream, store_id, cursor_value, last_run_at, status)
+   - Existing migrations for `shopify.orders`, `gorgias.tickets` + history tables
 
-4. **shopify-poller Lambda**
-   - GraphQL query for orders (cursor-based pagination)
-   - Write raw to S3
-   - Return PollerOutput
-
-5. **processor Lambda**
-   - Schema routing
-   - S3 read → validate → transform → Postgres upsert
-   - Idempotency check
-
-6. **run-finalizer Lambda**
-   - Close run record
-   - Update cursor
-   - Compute freshness
-   - Emit CloudWatch metrics
-
-7. **Incremental poll Step Function**
-   - Full state machine with error handling states
-   - Parameterized ASL template
-
-8. **Stream definition**
+4. **Stream definitions** (already done)
    - `streams/shopify-orders.yaml`
+   - `streams/gorgias-tickets.yaml`
 
-9. **Postgres migration**
-   - `shopify.orders` + `shopify.orders_history` tables
+5. **Deploy to dev, verify, deploy to prod**
 
-10. **Terraform wiring**
-    - EventBridge schedule → Step Function
-    - Lambda deployments
-    - Everything connected end-to-end
+### Reused from existing codebase (unchanged)
+- `src/shared/shopify_client.py` — GraphQL client, cursor, rate limits
+- `src/shared/gorgias_client.py` — REST client, checkpoint encoding
+- `src/shared/s3_writer.py` — gzip + S3 write
+- `src/shared/pg_client.py` — upsert-on-newer + history
+- `src/shared/observability.py` — structlog + metrics
+- `src/shared/ssm.py` — SSM parameter fetch
+- `src/shared/stream_config.py` — YAML parsing
+- `schemas/raw/` and `schemas/canonical/` — all Pydantic models + transforms
+- `streams/*.yaml` — stream definitions
+- `migrations/001_shopify_orders.sql`, `migrations/002_gorgias_tickets.sql`
 
-11. **CloudWatch dashboard + alarms**
-    - Freshness, errors, run outcomes
-
-12. **Basic tests**
-    - Transform unit tests with fixture data
-    - Stream spec validation
+### Intentionally deferred (dormant, not deleted)
+- Step Function orchestration → adopt when Lambda hits 15-min timeout
+- DynamoDB control plane → adopt when run-level audit trail is required
+- DynamoDB idempotency layer → adopt when Postgres UNIQUE constraint is insufficient
+- VPC + endpoints → adopt when egress cost justifies it
+- RDS Proxy → adopt when connection pooling becomes an issue
+- Per-function IAM roles → adopt when security posture requires least-privilege per function
+- CloudWatch dashboard + 9 alarms → adopt when on-call rotation needs dashboards
+- Parameterized Terraform modules → adopt at 5+ streams
 
 ### Do NOT build
-
-- Webhook receiver (polling covers orders for V1)
-- Replay Step Function (manual replay is sufficient)
+- Webhook receiver
+- Replay Step Function
 - Normalization layer
 - CI/CD pipeline
 - Multi-store support
 - Admin UI
+- DynamoDB anything (for now)
 
 ### Exit criteria
+
+- [ ] Shopify orders ingesting on 5-minute schedule
+- [ ] Gorgias tickets ingesting on 15-minute schedule
+- [ ] Raw payloads in S3 with correct key pattern
+- [ ] Records in Postgres with lineage (`raw_s3_key`)
+- [ ] Cursor advancing correctly between runs (stored in Postgres)
+- [ ] No duplicate records after 24 hours of scheduled runs
+- [ ] Structured logs visible in CloudWatch
+- [ ] Lambda error alarm fires on failure
+
+---
+
+## Phase 1: Harden the MVP (~2-3 weeks after Phase 0 stable)
+
+### Goal
+Selectively adopt battle-hardened components as operational reality demands. Not everything at once — each component is adopted independently when its trigger is hit.
+
+### Adopt when triggered (see ADR-021 for triggers)
+
+1. **Step Function pagination** — if/when backfills hit Lambda timeout
+2. **RDS Proxy** — if/when connection errors appear under concurrency
+3. **CloudWatch dashboard + alarms** — once traffic patterns are understood
+4. **VPC + endpoints** — once egress costs are measurable
+5. **DynamoDB idempotency** — if Postgres UNIQUE constraint causes performance issues
+
+### Build new
+
+1. **CI/CD pipeline** — before second engineer touches production
+2. **Replay from S3** — document manual process first, automate after 3+ manual replays
+
+### Exit criteria (original Phase 1 criteria, now achievable incrementally)
 
 - [ ] Shopify orders ingesting on 5-minute schedule
 - [ ] Raw payloads in S3 with correct key pattern
@@ -87,10 +114,10 @@ One golden-path stream (Shopify Orders) running end-to-end in production. Pollin
 
 ---
 
-## Phase 2: Harden + Expand (~2-3 weeks after Phase 1 stable)
+## Phase 2: Expand + Webhooks (~2-3 weeks after Phase 1 stable)
 
 ### Goal
-Second stream proves config-driven pattern. Webhooks provide real-time supplement. Replay is automated. CI/CD prevents deployment mistakes.
+Third stream proves config-driven pattern. Webhooks provide real-time supplement. Full battle-hardened architecture adopted where triggers have been hit. CI/CD prevents deployment mistakes.
 
 ### Build
 
@@ -104,7 +131,7 @@ Second stream proves config-driven pattern. Webhooks provide real-time supplemen
    - Processing queue for webhook payloads
    - Dead letter queue with alarm
 
-3. **Second polling stream: Shopify Customers**
+3. **Third polling stream: Shopify Customers**
    - `streams/shopify-customers.yaml`
    - Pydantic schemas (raw + canonical)
    - Schema registry entry
@@ -116,7 +143,7 @@ Second stream proves config-driven pattern. Webhooks provide real-time supplemen
    - Replay request tracking in DynamoDB
    - Audit trail
 
-5. **CI/CD pipeline**
+5. **CI/CD pipeline** (if not already adopted in Phase 1)
    - PR: lint → test → terraform plan
    - Merge to main: terraform apply → Lambda deploy
 
@@ -141,9 +168,9 @@ Second stream proves config-driven pattern. Webhooks provide real-time supplemen
 
 ### Exit criteria
 
-- [ ] Two streams running (orders + customers)
+- [ ] Three streams running (orders + tickets + customers)
 - [ ] Webhooks flowing for orders (belt and suspenders with polling)
-- [ ] Adding a third Shopify stream would take <3 days
+- [ ] Adding a fourth stream would take <3 days
 - [ ] Replay works end-to-end (request → Step Function → reprocess → audit)
 - [ ] CI/CD pipeline operational
 - [ ] A new engineer can understand the system within 1 day (test this with a real person if possible)
@@ -213,10 +240,12 @@ Normalization layer proven with a second provider. Platform can be extended by e
 
 ### Why this order matters
 
-**Phase 1 first** because nothing else matters if data doesn't flow reliably. Premature optimization (normalization, CI/CD, multi-store) before proving the basic pipeline wastes effort on the wrong problems.
+**Phase 0 first** because data flowing into Postgres is the only thing that matters right now. The battle-hardened architecture was designed correctly, but deploying it all at once created paralysis. Phase 0 gets immediate ROI with the same data integrity guarantees.
+
+**Phase 1 is reactive, not prescriptive.** Instead of building everything upfront, we adopt hardened components when operational triggers are hit. This means we only pay the complexity cost when we're getting concrete value from it.
 
 **Phase 2 before Phase 3** because:
-- The second stream validates that the architecture is actually config-driven (not just "config-driven for one stream")
+- The third stream validates that the architecture is actually config-driven
 - CI/CD must exist before another human touches production
 - Webhooks + replay fill critical operational gaps
 
@@ -224,3 +253,7 @@ Normalization layer proven with a second provider. Platform can be extended by e
 - Normalization requires judgment about cross-provider semantics (better with two perspectives)
 - Multi-provider support is only needed when the business actually has a second provider
 - The CTO's time is better spent on architecture review than on grinding through a second provider integration
+
+### On preserving the battle-hardened design
+
+All existing code for the full architecture (Step Functions, DynamoDB control plane, 4-Lambda orchestration, parameterized Terraform modules) remains in the repository. It is dormant, not deleted. See [ADR-021](../adr/021-simplify-to-single-lambda-mvp.md) for the complete decision record and scale-up triggers.
