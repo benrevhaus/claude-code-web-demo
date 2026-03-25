@@ -1,0 +1,36 @@
+apiVersion: streams/v1
+
+source: shopify
+stream: customers
+display_name: Shopify Customers
+
+mode: graphql+webhook
+api_version: "2024-01"
+
+schedule: rate(15 minutes)
+backfill_enabled: false
+
+schema_version: shopify.customer.v1
+normalizes_to: commerce_customer
+
+idempotency_key:
+  - customer_id
+  - updated_at
+cursor_field: updated_at
+cursor_type: datetime
+
+freshness_sla_minutes: 30
+max_pages_per_run: 200
+page_size: 50
+rate_limit_bucket: shopify
+
+webhook_topics:
+  - customers/create
+  - customers/update
+  - customers/delete
+hmac_header: X-Shopify-Hmac-Sha256
+
+owner: platform
+tags:
+  - commerce
+  - customers

@@ -1,0 +1,30 @@
+apiVersion: streams/v1
+
+source: shopify
+stream: products
+display_name: Shopify Products
+
+mode: graphql
+api_version: "2024-01"
+
+schedule: rate(30 minutes)
+backfill_enabled: false
+
+schema_version: shopify.product.v1
+normalizes_to: commerce_product
+
+idempotency_key:
+  - product_id
+  - updated_at
+cursor_field: updated_at
+cursor_type: datetime
+
+freshness_sla_minutes: 60
+max_pages_per_run: 100
+page_size: 50
+rate_limit_bucket: shopify
+
+owner: platform
+tags:
+  - commerce
+  - products
