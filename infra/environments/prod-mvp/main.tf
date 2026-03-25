@@ -180,6 +180,14 @@ resource "aws_ssm_parameter" "shopify_webhook_secret" {
   lifecycle { ignore_changes = [value] }
 }
 
+resource "aws_ssm_parameter" "brandhaus_connection_string" {
+  name  = "/${local.prefix}/${local.env}/brandhaus/connection_string"
+  type  = "SecureString"
+  value = "PLACEHOLDER"
+
+  lifecycle { ignore_changes = [value] }
+}
+
 resource "aws_ssm_parameter" "gorgias_email" {
   name  = "/${local.prefix}/${local.env}/gorgias/email"
   type  = "SecureString"
@@ -224,7 +232,7 @@ resource "aws_sns_topic_subscription" "email" {
 # -----------------------------------------------------------------------------
 
 resource "aws_iam_role" "stream_runner" {
-  for_each = toset(["shopify-orders", "gorgias-tickets"])
+  for_each = toset(["shopify-orders", "shopify-customers", "shopify-products", "shopify-inventory", "gorgias-tickets"])
 
   name = "${local.prefix}-runner-${each.key}-${local.env}"
 
@@ -239,7 +247,7 @@ resource "aws_iam_role" "stream_runner" {
 }
 
 resource "aws_iam_role_policy" "stream_runner" {
-  for_each = toset(["shopify-orders", "gorgias-tickets"])
+  for_each = toset(["shopify-orders", "shopify-customers", "shopify-products", "shopify-inventory", "gorgias-tickets"])
 
   name = "stream-runner-policy"
   role = aws_iam_role.stream_runner[each.key].id
@@ -394,7 +402,288 @@ resource "aws_lambda_permission" "gorgias_eventbridge" {
 }
 
 # -----------------------------------------------------------------------------
-# CloudWatch Alarms — Lambda errors only (MVP)
+# Lambda + EventBridge — Shopify Customers (15 min)
+# -----------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "shopify_customers" {
+  name              = "/aws/lambda/${local.prefix}-runner-shopify-customers-${local.env}"
+  retention_in_days = 30
+}
+
+resource "aws_lambda_function" "shopify_customers" {
+  function_name = "${local.prefix}-runner-shopify-customers-${local.env}"
+  role          = aws_iam_role.stream_runner["shopify-customers"].arn
+  handler       = "src.lambdas.stream_runner.handler.handler"
+  runtime       = "python3.12"
+  timeout       = 900
+  memory_size   = 512
+
+  filename         = var.lambda_package_file
+  source_code_hash = filebase64sha256(var.lambda_package_file)
+
+  environment {
+    variables = {
+      RAW_BUCKET = aws_s3_bucket.raw.bucket
+      ENV        = local.env
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_group.shopify_customers]
+  lifecycle { ignore_changes = [filename, source_code_hash] }
+}
+
+resource "aws_cloudwatch_event_rule" "shopify_customers" {
+  name                = "${local.prefix}-shopify-customers-${local.env}"
+  schedule_expression = "rate(15 minutes)"
+  state               = "ENABLED"
+}
+
+resource "aws_cloudwatch_event_target" "shopify_customers" {
+  rule = aws_cloudwatch_event_rule.shopify_customers.name
+  arn  = aws_lambda_function.shopify_customers.arn
+  input = jsonencode({ source = "shopify", stream = "customers", store_id = var.shopify_store_id })
+}
+
+resource "aws_lambda_permission" "shopify_customers_eventbridge" {
+  statement_id  = "AllowEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.shopify_customers.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.shopify_customers.arn
+}
+
+# -----------------------------------------------------------------------------
+# Lambda + EventBridge — Shopify Products (30 min)
+# -----------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "shopify_products" {
+  name              = "/aws/lambda/${local.prefix}-runner-shopify-products-${local.env}"
+  retention_in_days = 30
+}
+
+resource "aws_lambda_function" "shopify_products" {
+  function_name = "${local.prefix}-runner-shopify-products-${local.env}"
+  role          = aws_iam_role.stream_runner["shopify-products"].arn
+  handler       = "src.lambdas.stream_runner.handler.handler"
+  runtime       = "python3.12"
+  timeout       = 900
+  memory_size   = 512
+
+  filename         = var.lambda_package_file
+  source_code_hash = filebase64sha256(var.lambda_package_file)
+
+  environment {
+    variables = {
+      RAW_BUCKET = aws_s3_bucket.raw.bucket
+      ENV        = local.env
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_group.shopify_products]
+  lifecycle { ignore_changes = [filename, source_code_hash] }
+}
+
+resource "aws_cloudwatch_event_rule" "shopify_products" {
+  name                = "${local.prefix}-shopify-products-${local.env}"
+  schedule_expression = "rate(30 minutes)"
+  state               = "ENABLED"
+}
+
+resource "aws_cloudwatch_event_target" "shopify_products" {
+  rule = aws_cloudwatch_event_rule.shopify_products.name
+  arn  = aws_lambda_function.shopify_products.arn
+  input = jsonencode({ source = "shopify", stream = "products", store_id = var.shopify_store_id })
+}
+
+resource "aws_lambda_permission" "shopify_products_eventbridge" {
+  statement_id  = "AllowEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.shopify_products.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.shopify_products.arn
+}
+
+# -----------------------------------------------------------------------------
+# Lambda + EventBridge — Shopify Inventory (15 min)
+# -----------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "shopify_inventory" {
+  name              = "/aws/lambda/${local.prefix}-runner-shopify-inventory-${local.env}"
+  retention_in_days = 30
+}
+
+resource "aws_lambda_function" "shopify_inventory" {
+  function_name = "${local.prefix}-runner-shopify-inventory-${local.env}"
+  role          = aws_iam_role.stream_runner["shopify-inventory"].arn
+  handler       = "src.lambdas.stream_runner.handler.handler"
+  runtime       = "python3.12"
+  timeout       = 900
+  memory_size   = 512
+
+  filename         = var.lambda_package_file
+  source_code_hash = filebase64sha256(var.lambda_package_file)
+
+  environment {
+    variables = {
+      RAW_BUCKET = aws_s3_bucket.raw.bucket
+      ENV        = local.env
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_group.shopify_inventory]
+  lifecycle { ignore_changes = [filename, source_code_hash] }
+}
+
+resource "aws_cloudwatch_event_rule" "shopify_inventory" {
+  name                = "${local.prefix}-shopify-inventory-${local.env}"
+  schedule_expression = "rate(15 minutes)"
+  state               = "ENABLED"
+}
+
+resource "aws_cloudwatch_event_target" "shopify_inventory" {
+  rule = aws_cloudwatch_event_rule.shopify_inventory.name
+  arn  = aws_lambda_function.shopify_inventory.arn
+  input = jsonencode({ source = "shopify", stream = "inventory", store_id = var.shopify_store_id })
+}
+
+resource "aws_lambda_permission" "shopify_inventory_eventbridge" {
+  statement_id  = "AllowEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.shopify_inventory.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.shopify_inventory.arn
+}
+
+# -----------------------------------------------------------------------------
+# SQS — Webhook queue + DLQ
+# -----------------------------------------------------------------------------
+
+resource "aws_sqs_queue" "webhook_dlq" {
+  name                      = "${local.prefix}-webhooks-dlq-${local.env}"
+  message_retention_seconds = 1209600  # 14 days
+}
+
+resource "aws_sqs_queue" "webhooks" {
+  name                       = "${local.prefix}-webhooks-${local.env}"
+  visibility_timeout_seconds = 60
+  message_retention_seconds  = 345600  # 4 days
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.webhook_dlq.arn
+    maxReceiveCount     = 3
+  })
+}
+
+# -----------------------------------------------------------------------------
+# Webhook API Gateway (using stream-webhook module)
+# -----------------------------------------------------------------------------
+
+module "webhook" {
+  source = "../../modules/stream-webhook"
+
+  env                  = local.env
+  source_name          = "shopify"
+  stream_name          = "webhooks"
+  sqs_process_queue_url = aws_sqs_queue.webhooks.url
+  sqs_process_queue_arn = aws_sqs_queue.webhooks.arn
+  tags                 = { Project = "data-streams", Environment = local.env, ManagedBy = "terraform" }
+}
+
+# -----------------------------------------------------------------------------
+# Lambda — Webhook consumer
+# -----------------------------------------------------------------------------
+
+resource "aws_iam_role" "webhook_consumer" {
+  name = "${local.prefix}-webhook-consumer-${local.env}"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "webhook_consumer" {
+  name = "webhook-consumer-policy"
+  role = aws_iam_role.webhook_consumer.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "SQS"
+        Effect   = "Allow"
+        Action   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
+        Resource = aws_sqs_queue.webhooks.arn
+      },
+      {
+        Sid      = "S3"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:GetObject"]
+        Resource = "${aws_s3_bucket.raw.arn}/*"
+      },
+      {
+        Sid      = "SSM"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter", "ssm:GetParameters"]
+        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/${local.prefix}/${local.env}/*"
+      },
+      {
+        Sid      = "CloudWatch"
+        Effect   = "Allow"
+        Action   = ["cloudwatch:PutMetricData"]
+        Resource = "*"
+      },
+      {
+        Sid      = "Logs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:*"
+      },
+    ]
+  })
+}
+
+resource "aws_cloudwatch_log_group" "webhook_consumer" {
+  name              = "/aws/lambda/${local.prefix}-webhook-consumer-${local.env}"
+  retention_in_days = 30
+}
+
+resource "aws_lambda_function" "webhook_consumer" {
+  function_name    = "${local.prefix}-webhook-consumer-${local.env}"
+  role             = aws_iam_role.webhook_consumer.arn
+  handler          = "src.lambdas.webhook_consumer.handler.handler"
+  runtime          = "python3.12"
+  timeout          = 30
+  memory_size      = 256
+  reserved_concurrent_executions = 5
+
+  filename         = var.lambda_package_file
+  source_code_hash = filebase64sha256(var.lambda_package_file)
+
+  environment {
+    variables = {
+      RAW_BUCKET       = aws_s3_bucket.raw.bucket
+      ENV              = local.env
+      SHOPIFY_STORE_ID = var.shopify_store_id
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_group.webhook_consumer]
+  lifecycle { ignore_changes = [filename, source_code_hash] }
+}
+
+resource "aws_lambda_event_source_mapping" "webhook_sqs" {
+  event_source_arn                   = aws_sqs_queue.webhooks.arn
+  function_name                      = aws_lambda_function.webhook_consumer.arn
+  batch_size                         = 1
+  enabled                            = true
+  function_response_types            = ["ReportBatchItemFailures"]
+}
+
+# -----------------------------------------------------------------------------
+# CloudWatch Alarms
 # -----------------------------------------------------------------------------
 
 resource "aws_cloudwatch_metric_alarm" "shopify_errors" {
@@ -429,6 +718,76 @@ resource "aws_cloudwatch_metric_alarm" "gorgias_errors" {
   dimensions = {
     FunctionName = aws_lambda_function.gorgias_tickets.function_name
   }
+}
+
+resource "aws_cloudwatch_metric_alarm" "customers_errors" {
+  alarm_name          = "${local.prefix}-runner-shopify-customers-errors-${local.env}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 600
+  statistic           = "Sum"
+  threshold           = 2
+  alarm_description   = "Shopify customers stream runner errors"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  dimensions = { FunctionName = aws_lambda_function.shopify_customers.function_name }
+}
+
+resource "aws_cloudwatch_metric_alarm" "products_errors" {
+  alarm_name          = "${local.prefix}-runner-shopify-products-errors-${local.env}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 600
+  statistic           = "Sum"
+  threshold           = 2
+  alarm_description   = "Shopify products stream runner errors"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  dimensions = { FunctionName = aws_lambda_function.shopify_products.function_name }
+}
+
+resource "aws_cloudwatch_metric_alarm" "inventory_errors" {
+  alarm_name          = "${local.prefix}-runner-shopify-inventory-errors-${local.env}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 600
+  statistic           = "Sum"
+  threshold           = 2
+  alarm_description   = "Shopify inventory stream runner errors"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  dimensions = { FunctionName = aws_lambda_function.shopify_inventory.function_name }
+}
+
+resource "aws_cloudwatch_metric_alarm" "webhook_consumer_errors" {
+  alarm_name          = "${local.prefix}-webhook-consumer-errors-${local.env}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 600
+  statistic           = "Sum"
+  threshold           = 2
+  alarm_description   = "Webhook consumer Lambda errors"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  dimensions = { FunctionName = aws_lambda_function.webhook_consumer.function_name }
+}
+
+resource "aws_cloudwatch_metric_alarm" "webhook_dlq_depth" {
+  alarm_name          = "${local.prefix}-webhook-dlq-depth-${local.env}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  namespace           = "AWS/SQS"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Webhook DLQ has messages — failed webhook processing"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  dimensions = { QueueName = aws_sqs_queue.webhook_dlq.name }
 }
 
 # -----------------------------------------------------------------------------
@@ -482,6 +841,26 @@ output "shopify_runner_function" {
 
 output "gorgias_runner_function" {
   value = aws_lambda_function.gorgias_tickets.function_name
+}
+
+output "shopify_customers_function" {
+  value = aws_lambda_function.shopify_customers.function_name
+}
+
+output "shopify_products_function" {
+  value = aws_lambda_function.shopify_products.function_name
+}
+
+output "shopify_inventory_function" {
+  value = aws_lambda_function.shopify_inventory.function_name
+}
+
+output "webhook_consumer_function" {
+  value = aws_lambda_function.webhook_consumer.function_name
+}
+
+output "webhook_api_url" {
+  value = module.webhook.api_endpoint
 }
 
 output "sns_alerts_arn" {

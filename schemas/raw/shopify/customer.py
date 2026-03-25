@@ -59,8 +59,10 @@ class ShopifyCustomerRaw(BaseModel):
         # Map camelCase to snake_case
         normalized["first_name"] = normalized.get("first_name") or normalized.get("firstName")
         normalized["last_name"] = normalized.get("last_name") or normalized.get("lastName")
-        normalized["verified_email"] = normalized.get("verified_email") or normalized.get("verifiedEmail")
-        normalized["tax_exempt"] = normalized.get("tax_exempt") or normalized.get("taxExempt")
+        if "verified_email" not in normalized and "verifiedEmail" in normalized:
+            normalized["verified_email"] = normalized.get("verifiedEmail")
+        if "tax_exempt" not in normalized and "taxExempt" in normalized:
+            normalized["tax_exempt"] = normalized.get("taxExempt")
         normalized["created_at"] = normalized.get("created_at") or normalized.get("createdAt")
         normalized["updated_at"] = normalized.get("updated_at") or normalized.get("updatedAt")
         normalized["orders_count"] = normalized.get("orders_count") or normalized.get("numberOfOrders")
