@@ -676,10 +676,11 @@ resource "aws_lambda_function" "webhook_consumer" {
 }
 
 resource "aws_lambda_event_source_mapping" "webhook_sqs" {
-  event_source_arn = aws_sqs_queue.webhooks.arn
-  function_name    = aws_lambda_function.webhook_consumer.arn
-  batch_size       = 1
-  enabled          = true
+  event_source_arn                   = aws_sqs_queue.webhooks.arn
+  function_name                      = aws_lambda_function.webhook_consumer.arn
+  batch_size                         = 1
+  enabled                            = true
+  function_response_types            = ["ReportBatchItemFailures"]
 }
 
 # -----------------------------------------------------------------------------

@@ -196,6 +196,8 @@ def handler(event: dict, context=None) -> dict:
                 parent_id = getattr(raw_record, "id", None)
                 for sub in schema.sub_streams:
                     nested_items = getattr(raw_record, sub.extract_field, None) or []
+                    if not isinstance(nested_items, list):
+                        continue
                     for nested_raw_data in nested_items:
                         nested_raw = sub.raw_model(**nested_raw_data) if isinstance(nested_raw_data, dict) else nested_raw_data
                         sub_canonical = sub.transform(nested_raw, store_id, parent_id)
@@ -204,18 +206,26 @@ def handler(event: dict, context=None) -> dict:
                         sub_updated = sub_upsert(sub_canonical, s3_key, sub.schema_version, run_id)
                         if sub_updated:
                             sub_history(sub_canonical, run_id)
-                        # Dual-write sub-stream to brandhaus
-                        if brandhaus and isinstance(nested_raw_data, dict):
-                            brandhaus.write_raw(source, sub.extract_field, sub_canonical.id, nested_raw_data)
-
-                # Dual-write to brandhaus Postgres
-                if brandhaus:
-                    raw_dump = raw_record.model_dump(mode="json") if hasattr(raw_record, "model_dump") else {}
-                    brandhaus.write_raw(source, stream, raw_record.id, raw_dump)
-                    brandhaus.commit()
 
                 pg.commit()
                 processed += 1
+
+                # Dual-write to brandhaus (best-effort — never rolls back primary Postgres)
+                if brandhaus:
+                    try:
+                        raw_dump = raw_record.model_dump(mode="json")
+                        brandhaus.write_raw(source, stream, raw_record.id, raw_dump)
+                        for sub in schema.sub_streams:
+                            for item in getattr(raw_record, sub.extract_field, None) or []:
+                                if isinstance(item, dict):
+                                    item_id = item.get("id")
+                                    if item_id is not None:
+                                        brandhaus.write_raw(source, sub.extract_field, int(item_id), item)
+                        brandhaus.commit()
+                    except Exception as bh_err:
+                        log.warning("Brandhaus dual-write failed", error=str(bh_err), record_id=raw_record.id)
+                        brandhaus.rollback()
+
             except Exception as e:
                 failed += 1
                 record_id = getattr(raw_record, "id", "?")
