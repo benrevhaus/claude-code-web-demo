@@ -39,7 +39,6 @@ TOPIC_ROUTING: dict[str, tuple[str, str]] = {
     "customers-create": ("shopify", "customers"),
     "customers-update": ("shopify", "customers"),
     "customers-delete": ("shopify", "customers"),
-    "refunds-create": ("shopify", "orders"),  # Refunds come as order payloads
 }
 
 
@@ -97,6 +96,7 @@ def handler(event: dict, context=None) -> dict:
     processed = 0
     failed = 0
     errors: list[str] = []
+    failed_message_ids: list[str] = []
 
     s3 = _get_s3_writer()
     pg = _get_pg()
@@ -104,7 +104,11 @@ def handler(event: dict, context=None) -> dict:
     metrics = _get_metrics()
     store_id = os.environ.get("SHOPIFY_STORE_ID", "")
 
+    if not store_id:
+        log.error("SHOPIFY_STORE_ID env var is not set")
+
     for sqs_record in records:
+        message_id = sqs_record.get("messageId", "")
         try:
             # Extract topic and HMAC from SQS message attributes
             msg_attrs = sqs_record.get("messageAttributes", {})
@@ -113,33 +117,38 @@ def handler(event: dict, context=None) -> dict:
             raw_body = sqs_record.get("body", "")
 
             if not topic:
-                log.warning("Missing topic in SQS message attributes")
+                log.warning("Missing topic in SQS message attributes", message_id=message_id)
                 failed += 1
+                failed_message_ids.append(message_id)
                 continue
 
             # Route topic to (source, stream)
             route = TOPIC_ROUTING.get(topic)
             if route is None:
-                log.warning("Unknown webhook topic", topic=topic)
+                log.warning("Unknown webhook topic", topic=topic, message_id=message_id)
                 failed += 1
+                failed_message_ids.append(message_id)
                 continue
             source, stream = route
 
-            # Validate HMAC
-            if hmac_header:
-                secret = _get_webhook_secret()
-                if not _validate_hmac(raw_body, hmac_header, secret):
-                    log.error("HMAC validation failed", topic=topic)
-                    failed += 1
-                    continue
-            else:
-                log.warning("No HMAC header — skipping validation", topic=topic)
+            # Validate HMAC — reject if missing or invalid
+            secret = _get_webhook_secret()
+            if not hmac_header:
+                log.error("Missing HMAC header — rejecting webhook", topic=topic, message_id=message_id)
+                failed += 1
+                failed_message_ids.append(message_id)
+                continue
+            if not _validate_hmac(raw_body, hmac_header, secret):
+                log.error("HMAC validation failed", topic=topic, message_id=message_id)
+                failed += 1
+                failed_message_ids.append(message_id)
+                continue
 
             # Parse the webhook payload
             payload = json.loads(raw_body)
             webhook_id = str(uuid.uuid4())
 
-            # Write raw to S3
+            # Write raw to S3 (all topics, including customer deletes — immutable audit trail)
             s3_key = s3.build_webhook_key(
                 source=source,
                 stream=stream,
@@ -161,11 +170,15 @@ def handler(event: dict, context=None) -> dict:
             # Handle customer deletion specially
             if topic == "customers-delete":
                 customer_id = payload.get("id")
-                if customer_id and store_id:
-                    pg.soft_delete_customer(int(customer_id), store_id)
-                    pg.commit()
-                    processed += 1
-                    log.info("Customer soft-deleted", customer_id=customer_id, topic=topic)
+                if not customer_id or not store_id:
+                    log.error("Customer delete missing id or store_id", customer_id=customer_id, message_id=message_id)
+                    failed += 1
+                    failed_message_ids.append(message_id)
+                    continue
+                pg.soft_delete_customer(int(customer_id), store_id)
+                pg.commit()
+                processed += 1
+                log.info("Customer soft-deleted", customer_id=customer_id, topic=topic)
                 continue
 
             # Get schema and process the record
@@ -185,6 +198,8 @@ def handler(event: dict, context=None) -> dict:
             parent_id = getattr(raw_record, "id", None)
             for sub in schema.sub_streams:
                 nested_items = getattr(raw_record, sub.extract_field, None) or []
+                if not isinstance(nested_items, list):
+                    continue
                 for nested_raw_data in nested_items:
                     nested_raw = sub.raw_model(**nested_raw_data) if isinstance(nested_raw_data, dict) else nested_raw_data
                     sub_canonical = sub.transform(nested_raw, store_id, parent_id)
@@ -193,16 +208,22 @@ def handler(event: dict, context=None) -> dict:
                     sub_updated = sub_upsert(sub_canonical, s3_key, sub.schema_version, webhook_id)
                     if sub_updated:
                         sub_history(sub_canonical, webhook_id)
-                    if brandhaus and isinstance(nested_raw_data, dict):
-                        brandhaus.write_raw(source, sub.extract_field, sub_canonical.id, nested_raw_data)
-
-            # Dual-write to brandhaus
-            if brandhaus:
-                brandhaus.write_raw(source, stream, raw_record.id, payload)
-                brandhaus.commit()
 
             pg.commit()
             processed += 1
+
+            # Dual-write to brandhaus (best-effort — never affects primary processing)
+            if brandhaus:
+                try:
+                    brandhaus.write_raw(source, stream, raw_record.id, payload)
+                    for sub in schema.sub_streams:
+                        for item in getattr(raw_record, sub.extract_field, None) or []:
+                            if isinstance(item, dict) and item.get("id") is not None:
+                                brandhaus.write_raw(source, sub.extract_field, int(item["id"]), item)
+                    brandhaus.commit()
+                except Exception as bh_err:
+                    log.warning("Brandhaus dual-write failed", error=str(bh_err))
+                    brandhaus.rollback()
 
             log.info(
                 "Webhook processed",
@@ -215,20 +236,20 @@ def handler(event: dict, context=None) -> dict:
 
         except Exception as e:
             failed += 1
+            failed_message_ids.append(message_id)
             errors.append(str(e))
-            log.error("Webhook processing failed", error=str(e))
+            log.error("Webhook processing failed", error=str(e), message_id=message_id)
             pg.rollback()
+            if brandhaus:
+                brandhaus.rollback()
 
     # Emit metrics
     metrics.emit_records("shopify", "webhooks", processed, 0, failed)
 
-    result = {
-        "processed": processed,
-        "failed": failed,
-        "total": len(records),
-    }
-    if errors:
-        result["errors"] = errors[:10]
+    log.info("Batch complete", processed=processed, failed=failed, total=len(records))
 
-    log.info("Batch complete", **result)
+    # Return batchItemFailures so SQS retries only the failed messages
+    result: dict = {}
+    if failed_message_ids:
+        result["batchItemFailures"] = [{"itemIdentifier": mid} for mid in failed_message_ids]
     return result

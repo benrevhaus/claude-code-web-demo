@@ -51,8 +51,14 @@ class ShopifyAddressRaw(BaseModel):
         if not isinstance(data, dict):
             return data
         normalized = dict(data)
-        if "country_code" not in normalized and "countryCodeV2" in normalized:
-            normalized["country_code"] = normalized.get("countryCodeV2")
+        if "firstName" in normalized:
+            normalized.setdefault("first_name", normalized["firstName"])
+        if "lastName" in normalized:
+            normalized.setdefault("last_name", normalized["lastName"])
+        if "provinceCode" in normalized:
+            normalized.setdefault("province_code", normalized["provinceCode"])
+        if "countryCodeV2" in normalized:
+            normalized.setdefault("country_code", normalized["countryCodeV2"])
         return normalized
 
 
