@@ -115,6 +115,8 @@ class ShopifyOrderRaw(BaseModel):
     shipping_address: Optional[ShopifyAddressRaw] = None
     billing_address: Optional[ShopifyAddressRaw] = None
     customer: Optional[dict[str, Any]] = None
+    refunds: Optional[list[dict[str, Any]]] = None
+    transactions: Optional[list[dict[str, Any]]] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -155,6 +157,15 @@ class ShopifyOrderRaw(BaseModel):
 
         if isinstance(line_items, dict) and "edges" in line_items:
             normalized["line_items"] = [edge.get("node", {}) for edge in line_items.get("edges", [])]
+
+        # Unwrap refunds and transactions from GraphQL edges
+        refunds = normalized.get("refunds") or {}
+        if isinstance(refunds, dict) and "edges" in refunds:
+            normalized["refunds"] = [edge.get("node", {}) for edge in refunds.get("edges", [])]
+
+        transactions = normalized.get("transactions") or {}
+        if isinstance(transactions, dict) and "edges" in transactions:
+            normalized["transactions"] = [edge.get("node", {}) for edge in transactions.get("edges", [])]
 
         return normalized
 

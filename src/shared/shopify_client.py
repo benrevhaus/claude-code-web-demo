@@ -1,4 +1,4 @@
-"""Shopify GraphQL client for polling orders."""
+"""Shopify GraphQL client for polling multiple resource types."""
 
 from __future__ import annotations
 
@@ -11,7 +11,11 @@ from urllib.request import Request, urlopen
 
 from src.shared.ssm import get_env_or_ssm
 
-GRAPHQL_QUERY = """
+# ---------------------------------------------------------------------------
+# GraphQL queries — one per resource type
+# ---------------------------------------------------------------------------
+
+ORDERS_QUERY = """
 query FetchOrders($first: Int!, $after: String, $query: String) {
   orders(first: $first, after: $after, sortKey: UPDATED_AT, reverse: false, query: $query) {
     edges {
@@ -83,6 +87,58 @@ query FetchOrders($first: Int!, $after: String, $query: String) {
             }
           }
         }
+        refunds(first: 10) {
+          edges {
+            node {
+              id
+              createdAt
+              note
+              totalRefundedSet {
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
+              refundLineItems(first: 50) {
+                edges {
+                  node {
+                    quantity
+                    lineItem {
+                      id
+                      name
+                      sku
+                    }
+                    subtotalSet {
+                      shopMoney {
+                        amount
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        transactions(first: 50) {
+          edges {
+            node {
+              id
+              kind
+              status
+              amountSet {
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
+              gateway
+              createdAt
+              parentTransaction {
+                id
+              }
+            }
+          }
+        }
       }
     }
     pageInfo {
@@ -92,6 +148,172 @@ query FetchOrders($first: Int!, $after: String, $query: String) {
   }
 }
 """.strip()
+
+CUSTOMERS_QUERY = """
+query FetchCustomers($first: Int!, $after: String, $query: String) {
+  customers(first: $first, after: $after, sortKey: UPDATED_AT, reverse: false, query: $query) {
+    edges {
+      cursor
+      node {
+        id
+        email
+        firstName
+        lastName
+        phone
+        state
+        tags
+        note
+        verifiedEmail
+        taxExempt
+        createdAt
+        updatedAt
+        numberOfOrders
+        amountSpent {
+          amount
+          currencyCode
+        }
+        defaultAddress {
+          firstName
+          lastName
+          address1
+          address2
+          city
+          province
+          provinceCode
+          country
+          countryCodeV2
+          zip
+          phone
+        }
+        addresses {
+          firstName
+          lastName
+          address1
+          address2
+          city
+          province
+          provinceCode
+          country
+          countryCodeV2
+          zip
+          phone
+        }
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+""".strip()
+
+PRODUCTS_QUERY = """
+query FetchProducts($first: Int!, $after: String, $query: String) {
+  products(first: $first, after: $after, sortKey: UPDATED_AT, reverse: false, query: $query) {
+    edges {
+      cursor
+      node {
+        id
+        title
+        handle
+        status
+        vendor
+        productType
+        tags
+        bodyHtml
+        createdAt
+        updatedAt
+        publishedAt
+        variants(first: 50) {
+          edges {
+            node {
+              id
+              title
+              sku
+              barcode
+              inventoryQuantity
+              priceV2 {
+                amount
+                currencyCode
+              }
+              compareAtPriceV2 {
+                amount
+                currencyCode
+              }
+              weight
+              weightUnit
+            }
+          }
+        }
+        images(first: 20) {
+          edges {
+            node {
+              url
+              altText
+            }
+          }
+        }
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+""".strip()
+
+INVENTORY_QUERY = """
+query FetchInventory($first: Int!, $after: String, $query: String) {
+  inventoryItems(first: $first, after: $after, query: $query) {
+    edges {
+      cursor
+      node {
+        id
+        sku
+        tracked
+        createdAt
+        updatedAt
+        variant {
+          id
+          product {
+            id
+          }
+        }
+        inventoryLevels(first: 20) {
+          edges {
+            node {
+              id
+              quantities(names: ["available", "committed", "on_hand"]) {
+                name
+                quantity
+              }
+              location {
+                id
+                name
+              }
+              updatedAt
+            }
+          }
+        }
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+""".strip()
+
+# Map stream name -> (query, response root key in data.{key}.edges)
+STREAM_QUERIES: dict[str, tuple[str, str]] = {
+    "orders": (ORDERS_QUERY, "orders"),
+    "customers": (CUSTOMERS_QUERY, "customers"),
+    "products": (PRODUCTS_QUERY, "products"),
+    "inventory": (INVENTORY_QUERY, "inventoryItems"),
+}
 
 
 @dataclass
@@ -124,14 +346,18 @@ def decode_cursor_state(cursor: str | None) -> tuple[str | None, str | None]:
     return payload.get("checkpoint"), payload.get("page_cursor")
 
 
-class ShopifyOrdersClient:
-    """Fetch Shopify orders using the GraphQL Admin API."""
+class ShopifyGraphQLClient:
+    """Generic Shopify GraphQL Admin API client — works for any resource type."""
 
-    def __init__(self, access_token: str | None = None):
+    def __init__(self, stream: str = "orders", access_token: str | None = None):
         env = os.environ.get("ENV", "dev")
         prefix = os.environ.get("PARAM_PREFIX", "data-streams")
         access_token_param = f"/{prefix}/{env}/shopify/access_token"
         self._access_token = access_token or get_env_or_ssm("SHOPIFY_ACCESS_TOKEN", access_token_param)
+
+        if stream not in STREAM_QUERIES:
+            raise ValueError(f"Unknown Shopify stream: {stream}. Available: {list(STREAM_QUERIES)}")
+        self._query, self._root_key = STREAM_QUERIES[stream]
 
     def fetch_page(
         self,
@@ -149,7 +375,7 @@ class ShopifyOrdersClient:
         query_filter = f"updated_at:>={checkpoint}" if checkpoint else None
 
         payload = {
-            "query": GRAPHQL_QUERY,
+            "query": self._query,
             "variables": {
                 "first": page_size,
                 "after": page_cursor,
@@ -192,9 +418,9 @@ class ShopifyOrdersClient:
         if body.get("errors"):
             raise RuntimeError(f"Shopify GraphQL errors: {body['errors']}")
 
-        orders = body.get("data", {}).get("orders", {})
-        edges = orders.get("edges", [])
-        page_info = orders.get("pageInfo", {})
+        resource = body.get("data", {}).get(self._root_key, {})
+        edges = resource.get("edges", [])
+        page_info = resource.get("pageInfo", {})
         last_updated_at = edges[-1]["node"].get("updatedAt") if edges else checkpoint
 
         next_cursor = None
@@ -234,3 +460,12 @@ class ShopifyOrdersClient:
             return json.loads(exc.read())
         except Exception:
             return {"error": str(exc)}
+
+
+# Backwards-compatible alias
+ShopifyOrdersClient = ShopifyGraphQLClient
+
+
+def get_shopify_client(stream: str, access_token: str | None = None) -> ShopifyGraphQLClient:
+    """Factory: return a client configured for the given stream."""
+    return ShopifyGraphQLClient(stream=stream, access_token=access_token)

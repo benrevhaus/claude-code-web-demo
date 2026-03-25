@@ -102,7 +102,7 @@ def inject_dependencies(s3_env):
     runner_mod._s3_writer = s3_env
     runner_mod._pg = pg
     runner_mod._metrics = metrics
-    runner_mod._shopify_client = None
+    runner_mod._shopify_clients.clear()
     runner_mod._gorgias_client = None
 
     yield {"s3": s3_env, "pg": pg, "metrics": metrics}
@@ -111,7 +111,7 @@ def inject_dependencies(s3_env):
     runner_mod._s3_writer = None
     runner_mod._pg = None
     runner_mod._metrics = None
-    runner_mod._shopify_client = None
+    runner_mod._shopify_clients.clear()
     runner_mod._gorgias_client = None
 
 
@@ -137,7 +137,7 @@ class TestShopifyStreamRunner:
             checkpoint_cursor="2024-03-15T11:30:00Z",
             has_more=False,
         )
-        runner_mod._shopify_client = mock_client
+        runner_mod._shopify_clients["orders"] = mock_client
 
         result = runner_mod.handler({
             "source": "shopify",
@@ -197,7 +197,7 @@ class TestShopifyStreamRunner:
                 has_more=False,
             ),
         ]
-        runner_mod._shopify_client = mock_client
+        runner_mod._shopify_clients["orders"] = mock_client
 
         result = runner_mod.handler({
             "source": "shopify",
@@ -230,7 +230,7 @@ class TestShopifyStreamRunner:
             checkpoint_cursor="2024-03-15T12:00:00Z",
             has_more=False,
         )
-        runner_mod._shopify_client = mock_client
+        runner_mod._shopify_clients["orders"] = mock_client
 
         result = runner_mod.handler({
             "source": "shopify",
@@ -279,7 +279,7 @@ class TestShopifyStreamRunner:
                 has_more=False,
             ),
         ]
-        runner_mod._shopify_client = mock_client
+        runner_mod._shopify_clients["orders"] = mock_client
 
         result = runner_mod.handler({
             "source": "shopify",
@@ -303,7 +303,7 @@ class TestShopifyStreamRunner:
             checkpoint_cursor=None,
             has_more=False,
         )
-        runner_mod._shopify_client = mock_client
+        runner_mod._shopify_clients["orders"] = mock_client
 
         result = runner_mod.handler({
             "source": "shopify",
@@ -373,7 +373,7 @@ class TestMaxPagesRespected:
             checkpoint_cursor="2024-03-15T10:00:00Z",
             has_more=True,
         )
-        runner_mod._shopify_client = mock_client
+        runner_mod._shopify_clients["orders"] = mock_client
 
         result = runner_mod.handler({
             "source": "shopify",

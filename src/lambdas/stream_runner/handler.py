@@ -14,12 +14,13 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from src.shared.brandhaus_writer import BrandhausWriter, is_dual_write_enabled
 from src.shared.gorgias_client import GorgiasTicketsClient
 from src.shared.observability import MetricsClient, setup_logging
 from src.shared.pg_client import PgClient
 from src.shared.s3_writer import S3Writer
 from src.shared.schema_registry import get_schema
-from src.shared.shopify_client import ShopifyOrdersClient
+from src.shared.shopify_client import ShopifyGraphQLClient, get_shopify_client
 from src.shared.stream_config import load_all_stream_configs
 
 log = setup_logging("stream-runner")
@@ -28,7 +29,8 @@ log = setup_logging("stream-runner")
 _s3_writer: S3Writer | None = None
 _pg: PgClient | None = None
 _metrics: MetricsClient | None = None
-_shopify_client = None
+_brandhaus: BrandhausWriter | None = None
+_shopify_clients: dict[str, ShopifyGraphQLClient] = {}
 _gorgias_client = None
 
 
@@ -46,6 +48,15 @@ def _get_pg() -> PgClient:
     return _pg
 
 
+def _get_brandhaus() -> BrandhausWriter | None:
+    global _brandhaus
+    if not is_dual_write_enabled():
+        return None
+    if _brandhaus is None:
+        _brandhaus = BrandhausWriter.from_env()
+    return _brandhaus
+
+
 def _get_metrics() -> MetricsClient:
     global _metrics
     if _metrics is None:
@@ -53,9 +64,11 @@ def _get_metrics() -> MetricsClient:
     return _metrics
 
 
-def _get_provider_client(source: str):
+def _get_provider_client(source: str, stream: str = "orders"):
     if source == "shopify":
-        return _shopify_client or ShopifyOrdersClient()
+        if stream not in _shopify_clients:
+            _shopify_clients[stream] = get_shopify_client(stream)
+        return _shopify_clients[stream]
     if source == "gorgias":
         return _gorgias_client or GorgiasTicketsClient()
     raise ValueError(f"Unsupported source: {source}")
@@ -87,9 +100,10 @@ def handler(event: dict, context=None) -> dict:
     )
 
     # Dependencies
-    client = _get_provider_client(source)
+    client = _get_provider_client(source, stream)
     s3 = _get_s3_writer()
     pg = _get_pg()
+    brandhaus = _get_brandhaus()
     metrics = _get_metrics()
 
     # Read cursor from Postgres
@@ -170,10 +184,36 @@ def handler(event: dict, context=None) -> dict:
 
         for raw_record in records:
             try:
-                canonical = schema.transform(raw_record, store_id)
-                updated = upsert_fn(canonical, s3_key, schema.version, run_id)
-                if updated:
-                    history_fn(canonical, run_id)
+                result = schema.transform(raw_record, store_id)
+                # Some transforms return a list (e.g., inventory: one item -> multiple levels)
+                canonical_list = result if schema.transform_returns_list else [result]
+                for canonical in canonical_list:
+                    updated = upsert_fn(canonical, s3_key, schema.version, run_id)
+                    if updated:
+                        history_fn(canonical, run_id)
+
+                # Extract and upsert sub-streams (e.g., refunds/transactions from orders)
+                parent_id = getattr(raw_record, "id", None)
+                for sub in schema.sub_streams:
+                    nested_items = getattr(raw_record, sub.extract_field, None) or []
+                    for nested_raw_data in nested_items:
+                        nested_raw = sub.raw_model(**nested_raw_data) if isinstance(nested_raw_data, dict) else nested_raw_data
+                        sub_canonical = sub.transform(nested_raw, store_id, parent_id)
+                        sub_upsert = getattr(pg, sub.pg_upsert_method)
+                        sub_history = getattr(pg, sub.pg_history_method)
+                        sub_updated = sub_upsert(sub_canonical, s3_key, sub.schema_version, run_id)
+                        if sub_updated:
+                            sub_history(sub_canonical, run_id)
+                        # Dual-write sub-stream to brandhaus
+                        if brandhaus and isinstance(nested_raw_data, dict):
+                            brandhaus.write_raw(source, sub.extract_field, sub_canonical.id, nested_raw_data)
+
+                # Dual-write to brandhaus Postgres
+                if brandhaus:
+                    raw_dump = raw_record.model_dump(mode="json") if hasattr(raw_record, "model_dump") else {}
+                    brandhaus.write_raw(source, stream, raw_record.id, raw_dump)
+                    brandhaus.commit()
+
                 pg.commit()
                 processed += 1
             except Exception as e:

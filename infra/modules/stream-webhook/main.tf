@@ -91,8 +91,12 @@ resource "aws_apigatewayv2_integration" "sqs" {
   payload_format_version = "1.0"
 
   request_parameters = {
-    QueueUrl    = var.sqs_process_queue_url
-    MessageBody = "$request.body"
+    QueueUrl                             = var.sqs_process_queue_url
+    MessageBody                          = "$request.body"
+    "MessageAttribute.topic.StringValue" = "$request.pathParameters.topic"
+    "MessageAttribute.topic.DataType"    = "String"
+    "MessageAttribute.hmac.StringValue"  = "$request.header.X-Shopify-Hmac-Sha256"
+    "MessageAttribute.hmac.DataType"     = "String"
   }
 }
 

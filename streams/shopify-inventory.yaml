@@ -1,0 +1,23 @@
+apiVersion: streams/v1
+source: shopify
+stream: inventory
+display_name: Shopify Inventory Levels
+mode: graphql
+api_version: "2024-01"
+schedule: rate(15 minutes)
+backfill_enabled: false
+schema_version: shopify.inventory.v1
+normalizes_to: commerce_inventory
+idempotency_key:
+  - inventory_item_id
+  - location_id
+cursor_field: updated_at
+cursor_type: datetime
+freshness_sla_minutes: 30
+max_pages_per_run: 200
+page_size: 50
+rate_limit_bucket: shopify
+owner: platform
+tags:
+  - commerce
+  - inventory
