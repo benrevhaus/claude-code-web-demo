@@ -18,12 +18,17 @@ A serverless data ingestion platform that pulls vendor data (starting with Shopi
 
 ---
 
+## Environments
+**Single prod environment only (ADR-023).** No separate dev. The `dev-mvp/` Terraform exists as reference but is not deployed — don't maintain it. All work targets `infra/environments/prod-mvp/`. If you need to test a risky change, spin up a temporary cluster and tear it down.
+
+---
+
 ## Stack
 - **Runtime:** Python 3.12, Pydantic v2
-- **Infrastructure:** Terraform (modular, parameterized per stream)
-- **Compute:** AWS Lambda (4 roles: poller, processor, finalizer, webhook-receiver)
-- **Orchestration:** Step Functions (polling), SQS (webhooks)
-- **Storage:** S3 (immutable raw), DynamoDB (control plane), Aurora Serverless v2 Postgres (business data)
+- **Infrastructure:** Terraform (flat file per environment, `prod-mvp/main.tf`)
+- **Compute:** AWS Lambda (stream-runner per polling stream + webhook-consumer)
+- **Orchestration:** EventBridge schedules (polling), API Gateway → SQS (webhooks)
+- **Storage:** S3 (immutable raw), Aurora Serverless v2 Postgres (business data + control plane)
 - **Secrets:** SSM Parameter Store (SecureString)
 - **Observability:** CloudWatch metrics + alarms + structured logs (structlog)
 - **Scheduling:** EventBridge rules
@@ -65,8 +70,10 @@ data-streams/
 │   │   ├── stream-poller/          # Parameterized: Step Function + EventBridge + poller Lambda
 │   │   └── stream-webhook/         # Parameterized: API Gateway + SQS + webhook Lambda
 │   ├── environments/
-│   │   ├── dev/main.tf
-│   │   └── prod/main.tf
+│   │   ├── prod-mvp/main.tf        # ACTIVE — single prod environment (ADR-023)
+│   │   ├── dev-mvp/main.tf         # Reference only — not deployed
+│   │   ├── dev/main.tf             # Dormant (battle-hardened, not deployed)
+│   │   └── prod/main.tf            # Dormant (battle-hardened, not deployed)
 │   └── shared/                     # Terraform backend, lock table
 ├── tests/
 │   ├── fixtures/shopify/orders/    # Real API responses (3+ per stream)
@@ -232,3 +239,4 @@ If this repository is lost or needs to be recreated:
 - V26 — Tier 2 full-store Shopify sync. (1) Refactored `ShopifyOrdersClient` into generic `ShopifyGraphQLClient` with per-stream queries (orders, customers, products, inventory). Factory function `get_shopify_client(stream)`. (2) Sub-stream extraction: `SubStreamDef` in schema registry, refunds and transactions extracted from order payloads during both polling and webhook processing. Expanded orders GraphQL query to include refunds(first:10) and transactions(first:50). (3) Webhook consumer Lambda (`src/lambdas/webhook_consumer/handler.py`): SQS-triggered, validates HMAC, routes topics to schemas, handles customer soft-delete. Updated `stream-webhook` Terraform module with SQS MessageAttributes for topic + HMAC. (4) Terraform: 3 new polling Lambdas (customers 15min, products 30min, inventory 15min), SQS webhook queue + DLQ, API Gateway webhook endpoint, webhook consumer Lambda with reserved concurrency=5, 7 new CloudWatch alarms. (5) All pg_client upsert/history methods for customers, products, inventory, refunds, transactions. All 46 tests pass.
 - V27 — Dual-write + seed + webhook registration. (1) `src/shared/brandhaus_writer.py` — BrandhausWriter class that upserts raw_json to existing brandhaus Postgres tables (orders, customers, products, refunds, transactions). Controlled by `DUAL_WRITE_ENABLED` env var. Wired into both stream_runner and webhook_consumer handlers. (2) `scripts/seed_from_brandhaus.py` — batch-reads raw_json from brandhaus, writes to S3 (immutable audit trail), transforms into data-streams canonical tables, sets cursors so incremental polling picks up where seed left off. Handles sub-stream extraction for orders (refunds/transactions). (3) `scripts/register_shopify_webhooks.py` — registers webhook subscriptions via Shopify GraphQL Admin API `webhookSubscriptionCreate` mutation. Idempotent (checks existing subscriptions first). (4) SSM parameter for brandhaus connection string in Terraform.
 - V28 — Prod-MVP parity: added shopify-customers, shopify-products, shopify-inventory Lambdas + EventBridge schedules, SQS webhook queue + DLQ, webhook API Gateway module, webhook consumer Lambda with SQS event source mapping (ReportBatchItemFailures), 5 new CloudWatch alarms (customers/products/inventory errors, webhook consumer errors, webhook DLQ depth), brandhaus_connection_string SSM parameter, expanded IAM for_each to all 5 streams, and new outputs. All log groups use 30-day retention.
+- V29 — ADR-023: single prod environment, no separate dev. `dev-mvp/` retained as reference only. Updated CLAUDE.md stack section and Golden Path to reflect prod-only deployment. Created AGENTS.md.
