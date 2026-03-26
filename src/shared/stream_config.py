@@ -24,8 +24,15 @@ class CursorType(str, Enum):
     STRING = "string"
 
 
+class StreamStatus(str, Enum):
+    DRAFT = "draft"      # Schema/transform work in progress
+    READY = "ready"      # Code complete, awaiting Terraform + migration + secrets
+    LIVE = "live"        # Deployed, EventBridge running, data flowing
+
+
 class StreamConfig(BaseModel):
     api_version_spec: str = "streams/v1"
+    status: StreamStatus = StreamStatus.DRAFT
     source: str
     stream: str
     display_name: str
@@ -129,10 +136,19 @@ def load_stream_config(path: Union[str, Path]) -> StreamConfig:
     return StreamConfig(**raw)
 
 
-def load_all_stream_configs(streams_dir: Union[str, Path] = "streams") -> dict[str, StreamConfig]:
-    """Load all stream configs from a directory. Returns {source#stream: config}."""
+def load_all_stream_configs(
+    streams_dir: Union[str, Path] = "streams",
+    status_filter: Optional[set[StreamStatus]] = None,
+) -> dict[str, StreamConfig]:
+    """Load all stream configs from a directory. Returns {source#stream: config}.
+
+    If status_filter is provided, only streams matching one of the given statuses
+    are returned. The handler uses this to skip draft/ready streams at runtime.
+    """
     configs = {}
     for path in Path(streams_dir).glob("*.yaml"):
         config = load_stream_config(path)
+        if status_filter and config.status not in status_filter:
+            continue
         configs[config.stream_key] = config
     return configs

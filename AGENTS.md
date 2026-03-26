@@ -11,20 +11,41 @@ Instructions for AI agents working on this codebase.
 - SSM parameter paths: `/data-streams/prod/...`
 - Lambda `ENV` variable: `prod`
 
-## Adding a new Shopify stream
+## Stream status lifecycle (ADR-024)
 
-Config over code. No new Lambda code needed:
+Every stream YAML has a `status` field: `draft` → `ready` → `live`.
 
-1. `streams/{source}-{stream}.yaml` — stream config
-2. `schemas/raw/shopify/{resource}.py` — permissive raw model (`extra="allow"`, `@model_validator` for GraphQL normalization)
-3. `schemas/canonical/shopify/{resource}_v1.py` — strict canonical model
-4. `schemas/canonical/shopify/transforms.py` — add `transform_shopify_{resource}()` function
+| Status | Meaning | Safe to merge? | Has Terraform? |
+|--------|---------|---------------|----------------|
+| `draft` | Schema/transform work in progress | Yes | No |
+| `ready` | Code complete — YAML, schemas, transforms, pg_client, migration, registry entry all done | Yes | No |
+| `live` | Terraform deployed, EventBridge running, data flowing | Yes | Yes |
+
+**Build code first, add Terraform later.** All streams ship in the Lambda zip regardless of status, but only `live` streams have EventBridge triggers firing.
+
+## Adding a new stream
+
+### Phase 1: Build to `ready` (no infra, no cost)
+
+1. `streams/{source}-{stream}.yaml` — set `status: draft`, then `ready` when done
+2. `schemas/raw/{source}/{resource}.py` — permissive raw model (`extra="allow"`, `@model_validator` for GraphQL normalization)
+3. `schemas/canonical/{source}/{resource}_v1.py` — strict canonical model
+4. `schemas/canonical/{source}/transforms.py` — add `transform_{source}_{resource}()` function
 5. `src/shared/schema_registry.py` — add `SchemaEntry` to `SCHEMA_REGISTRY`
-6. `src/shared/shopify_client.py` — add GraphQL query constant + entry in `STREAM_QUERIES`
+6. `src/shared/{source}_client.py` — add API query (GraphQL for Shopify, REST client for other vendors)
 7. `src/shared/pg_client.py` — add `upsert_{resource}()` and `insert_{resource}_history()` methods
-8. `migrations/00N_{resource}.sql` — DDL under `shopify.*` schema
-9. `infra/environments/prod-mvp/main.tf` — Lambda + EventBridge + log group + alarm
-10. Bump `VERSION` in `pyproject.toml`, append to Change Log in `CLAUDE.md`
+8. `migrations/00N_{resource}.sql` — DDL under `{source}.*` schema
+9. Bump `VERSION` in `pyproject.toml`, append to Change Log in `CLAUDE.md`
+
+### Phase 2: Launch to `live` (when ready to deploy)
+
+1. Run migration: `psql "$CONN" -f migrations/00N_{resource}.sql`
+2. Add Lambda + EventBridge + log group + alarm to `infra/environments/prod-mvp/main.tf`
+3. Set SSM secrets (if new vendor)
+4. `terraform apply`
+5. Smoke test: `aws lambda invoke ...`
+6. Update YAML: `status: live`
+7. Commit
 
 ## Key patterns
 
