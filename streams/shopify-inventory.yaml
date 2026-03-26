@@ -1,4 +1,6 @@
 apiVersion: streams/v1
+status: ready
+
 source: shopify
 stream: inventory
 display_name: Shopify Inventory Levels
