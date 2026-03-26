@@ -1,138 +1,214 @@
-# Dev Validation Checklist
+# Validation Checklist — Prod MVP
 
-## 1. Start prerequisites
+Quick verification after deploying or updating the platform. See LAUNCH.md for the full step-by-step deployment guide.
 
-- Docker daemon running
-- Terraform can reach `registry.terraform.io`
-- AWS credentials point to the dev account
-- `python3.12` and `pip` available
+**Environment:** prod only (ADR-023). All commands target `prod-mvp/`.
 
-## 2. Build the Lambda artifact
+---
 
-```bash
-./scripts/build_lambda_package.sh
-ls -lh dist/lambda/data-streams.zip
-```
+## Prerequisites
 
-## 3. Initialize and validate Terraform
+- [ ] AWS CLI authenticated (`aws sts get-caller-identity`)
+- [ ] Terraform >= 1.5
+- [ ] Docker running
+- [ ] psql available
 
-```bash
-terraform -chdir=infra/environments/dev init
-terraform -chdir=infra/environments/dev validate
-terraform -chdir=infra/environments/dev plan
-```
+---
 
-## 4. Apply dev infrastructure
+## Build + deploy
 
-```bash
-terraform -chdir=infra/environments/dev apply
-```
+- [ ] Lambda package built and contains both handlers:
+  ```bash
+  unzip -l dist/lambda/data-streams.zip | grep -E "stream_runner|webhook_consumer"
+  ```
+- [ ] `terraform plan` is clean:
+  ```bash
+  terraform -chdir=infra/environments/prod-mvp plan
+  ```
+- [ ] `terraform apply` succeeds
 
-## 5. Set required SSM secrets in dev
+---
 
-Required paths:
-
-- `/data-streams/dev/shopify/access_token` (GraphQL Admin API bearer token)
-- `/data-streams/dev/shopify/webhook_secret`
-- `/data-streams/dev/postgres/connection_string`
-
-Example:
+## SSM secrets (set once, verify exist)
 
 ```bash
-aws ssm put-parameter \
-  --name /data-streams/dev/shopify/access_token \
-  --type SecureString \
-  --value 'shpat_...' \
-  --overwrite
-
-aws ssm put-parameter \
-  --name /data-streams/dev/postgres/connection_string \
-  --type SecureString \
-  --value 'postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require' \
-  --overwrite
+ENV=prod
+for param in \
+  /data-streams/$ENV/shopify/access_token \
+  /data-streams/$ENV/shopify/webhook_secret \
+  /data-streams/$ENV/gorgias/email \
+  /data-streams/$ENV/gorgias/api_key \
+  /data-streams/$ENV/postgres/connection_string; do
+  echo -n "$param: "
+  aws ssm get-parameter --name "$param" --query "Parameter.Version" --output text 2>/dev/null || echo "MISSING"
+done
 ```
 
-## 6. Run the database migration
+- [ ] All 5 parameters exist and are not `PLACEHOLDER`
+- [ ] Optional: `/data-streams/prod/brandhaus/connection_string` set if dual-write enabled
+
+---
+
+## Database migrations
+
+- [ ] All 8 migrations applied:
+  ```bash
+  psql "$CONN" -c "\dt shopify.*" -c "\dt gorgias.*" -c "\dt control.*"
+  ```
+  Expected: `shopify.orders`, `shopify.orders_history`, `shopify.customers`, `shopify.customers_history`, `shopify.products`, `shopify.products_history`, `shopify.inventory_levels`, `shopify.inventory_levels_history`, `shopify.refunds`, `shopify.refunds_history`, `shopify.transactions`, `shopify.transactions_history`, `gorgias.tickets`, `gorgias.tickets_history`, `control.stream_cursors`
+
+---
+
+## Shopify polling streams
+
+Invoke each manually and verify success:
 
 ```bash
-psql "$POSTGRES_URL" -f migrations/001_shopify_orders.sql
+STORE=YOUR_STORE
+
+for stream in orders customers products inventory; do
+  echo "=== shopify/$stream ==="
+  aws lambda invoke \
+    --function-name data-streams-runner-shopify-${stream}-prod \
+    --cli-binary-format raw-in-base64-out \
+    --payload "{\"source\":\"shopify\",\"stream\":\"$stream\",\"store_id\":\"$STORE\"}" \
+    /dev/stdout 2>/dev/null
+  echo
+done
 ```
 
-Or use the same connection string value you stored in SSM.
+- [ ] All return `"status": "success"`
+- [ ] `records_processed > 0` for orders, customers, products
+- [ ] S3 raw files exist:
+  ```bash
+  aws s3 ls s3://data-streams-raw-prod/shopify/ --recursive | head -5
+  ```
+- [ ] Postgres rows populated:
+  ```bash
+  psql "$CONN" -c "
+    SELECT 'orders' as t, count(*) FROM shopify.orders UNION ALL
+    SELECT 'customers', count(*) FROM shopify.customers UNION ALL
+    SELECT 'products', count(*) FROM shopify.products UNION ALL
+    SELECT 'inventory', count(*) FROM shopify.inventory_levels UNION ALL
+    SELECT 'refunds', count(*) FROM shopify.refunds UNION ALL
+    SELECT 'transactions', count(*) FROM shopify.transactions;
+  "
+  ```
+- [ ] Cursors saved:
+  ```bash
+  psql "$CONN" -c "SELECT source, stream, last_status, cursor_value, last_run_at FROM control.stream_cursors WHERE source='shopify';"
+  ```
 
-## 7. Trigger one manual poll execution
+---
 
-Get the state machine ARN:
+## Gorgias polling stream
 
 ```bash
-terraform -chdir=infra/environments/dev output step_function_arn
+aws lambda invoke \
+  --function-name data-streams-runner-gorgias-tickets-prod \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"source":"gorgias","stream":"tickets","store_id":"YOUR_STORE"}' \
+  /dev/stdout
 ```
 
-Start an execution:
+- [ ] Returns `"status": "success"`
+- [ ] Postgres: `psql "$CONN" -c "SELECT count(*) FROM gorgias.tickets;"`
+- [ ] Cursor: `psql "$CONN" -c "SELECT * FROM control.stream_cursors WHERE source='gorgias';"`
+
+---
+
+## Webhooks
+
+- [ ] Webhooks registered:
+  ```bash
+  python scripts/register_shopify_webhooks.py \
+    --store-id YOUR_STORE \
+    --api-url "$(terraform -chdir=infra/environments/prod-mvp output -raw webhook_api_url)" \
+    --access-token "shpat_..." \
+    --dry-run
+  ```
+  Should show 5 topics as already registered.
+- [ ] Test webhook: update a customer in Shopify admin, then:
+  ```bash
+  aws logs tail /aws/lambda/data-streams-webhook-consumer-prod --since 5m --format short
+  ```
+  Should show "Webhook processed" log entry.
+- [ ] SQS DLQ is empty:
+  ```bash
+  aws sqs get-queue-attributes \
+    --queue-url "$(aws sqs get-queue-url --queue-name data-streams-webhooks-dlq-prod --query QueueUrl --output text)" \
+    --attribute-names ApproximateNumberOfMessagesVisible \
+    --query "Attributes.ApproximateNumberOfMessagesVisible" --output text
+  ```
+  Expected: `0`
+
+---
+
+## Schedules running
+
+After 30 minutes:
+
+- [ ] Cursors are advancing:
+  ```bash
+  psql "$CONN" -c "SELECT source, stream, last_status, last_run_at, records_total FROM control.stream_cursors ORDER BY source, stream;"
+  ```
+- [ ] No Lambda errors:
+  ```bash
+  for fn in shopify-orders shopify-customers shopify-products shopify-inventory gorgias-tickets; do
+    echo "--- $fn ---"
+    aws logs tail /aws/lambda/data-streams-runner-${fn}-prod --since 30m --format short | grep -i error | head -3
+  done
+  ```
+
+---
+
+## Alarms
+
+- [ ] SNS subscription confirmed (check email inbox for AWS confirmation)
+- [ ] 9 CloudWatch alarms exist:
+  ```bash
+  aws cloudwatch describe-alarms --alarm-name-prefix data-streams --query "MetricAlarms[].AlarmName" --output table
+  ```
+
+---
+
+## CloudWatch metrics
+
+After at least one successful run per stream:
+
+- [ ] `DataStreams/records_processed` has data points
+- [ ] `DataStreams/freshness_lag_minutes` has data points
+- [ ] `DataStreams/run_duration_seconds` has data points
 
 ```bash
-aws stepfunctions start-execution \
-  --state-machine-arn <STEP_FUNCTION_ARN> \
-  --input '{"source":"shopify","stream":"orders","store_id":"your-store.myshopify.com","max_pages":2,"cursor_override":null,"max_pages_override":null}'
+aws cloudwatch get-metric-statistics \
+  --namespace DataStreams \
+  --metric-name records_processed \
+  --start-time "$(date -u -v-1H +%Y-%m-%dT%H:%M:%S)" \
+  --end-time "$(date -u +%Y-%m-%dT%H:%M:%S)" \
+  --period 300 \
+  --statistics Sum \
+  --dimensions Name=source,Value=shopify Name=stream,Value=orders
 ```
 
-## 8. Verify the execution succeeded
+---
 
-Check:
+## Dual-write (if enabled)
 
-- Step Functions execution status is `SUCCEEDED`
-- Lambda logs exist for initializer, poller, processor, finalizer
+- [ ] `DUAL_WRITE_ENABLED=true` in Lambda env vars
+- [ ] Brandhaus SSM param set: `/data-streams/prod/brandhaus/connection_string`
+- [ ] Verify brandhaus tables updating:
+  ```sql
+  -- Run against brandhaus Postgres
+  SELECT order_id, cache_updated_at FROM orders ORDER BY cache_updated_at DESC LIMIT 5;
+  ```
 
-## 9. Verify raw data in S3
+---
 
-Confirm at least one object exists under:
+## Record what you observe
 
-```text
-shopify/orders/<store_id>/YYYY/MM/DD/<run_id>/page_001.json.gz
-```
-
-## 10. Verify DynamoDB control records
-
-Check:
-
-- `RUN#<run_id>` exists with terminal status
-- `CURSOR#current` was updated
-- `FRESHNESS#current` exists
-- idempotency records were written under `IDEM#shopify#orders`
-
-## 11. Verify Postgres writes
-
-Check:
-
-- rows inserted into `shopify.orders`
-- rows inserted into `shopify.orders_history`
-- `raw_s3_key`, `schema_version`, and `run_id` are populated
-
-## 12. Verify metrics
-
-Check CloudWatch custom metrics:
-
-- `freshness_lag_minutes`
-- `run_duration_seconds`
-- `records_processed`
-- `pages_fetched`
-- `http_429_count`
-- `http_5xx_count`
-
-## 13. Run one idempotency replay check
-
-Invoke the processor again for the same S3 key and confirm:
-
-- `records_skipped > 0`
-- no duplicate Postgres rows
-
-## 14. If all of that passes, enable the EventBridge schedule and watch the next scheduled run
-
-## What to record
-
-- state machine ARN
-- one successful execution ARN
-- one S3 raw key
-- one DynamoDB run key
-- one sample `shopify.orders` row ID
-- any CloudWatch alarm/metric anomalies
+After validation, note:
+- Aurora endpoint
+- Webhook API Gateway URL
+- Any stream that returned 0 records (may need cursor reset)
+- Any CloudWatch anomalies
