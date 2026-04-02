@@ -210,6 +210,20 @@ If this repository is lost or needs to be recreated:
 ---
 
 ## Change Log
+
+- 0.34.0 — Added ADR-029, introduced GA4 event normalization schema changes, and updated the dashboard API to default to normalized valid events while keeping noise and path leaks queryable.
+- 0.35.0 — Replaced the single-event picker with curated top-event checkboxes, defaulted the dashboard to those normalized events, removed redundant landing controls from the visible workflow, and updated API/mock filtering to support multi-event selection.
+- 0.36.0 — Added select-all and deselect-all controls for the top-event filter and visible-column pickers, and let tables render a clear empty state when all columns are hidden.
+- 0.36.1 — Fixed empty event selection handling so deselecting all top events now returns zero event rows instead of dropping the event filter.
+- 0.37.0 — Added ADR-030 to split the GA4 dashboard product out of `data-streams` and defined the exact ownership boundary between ingestion responsibilities and analyst-facing dashboard concerns.
+- 0.38.0 — Added the analytics contract spec, superseded ADR-030 with ADR-031, and re-framed the dashboard as a read-only internal suite surface inside `data-streams` bound by documented analytical contracts.
+- 0.39.0 — Renamed the in-repo analytical surface to Data Streams Explorer across app copy and core docs, positioning GA4 as the first stream view inside a broader internal suite surface.
+- 0.40.0 — Added a true Data Streams Explorer home view with stream selection, making GA4 a navigable stream module instead of the default root screen.
+- 0.40.2 — Updated .gitignore for monorepo: added `*.tsbuildinfo` exclusion, organized Node/build sections, removed accidentally staged tsbuildinfo.
+- 0.40.1 — Made the top-left Data Streams Explorer label clickable so it always returns the UI to the explorer home view.
+- 0.33.0 — Added ADR-028, introduced the variant-aware GA4 aggregate schema migration, and extended the dashboard API to support landing-page and page-variant analysis.
+- 0.32.0 — Added a local GA4 historical dashboard MVP track: React/Vite frontend, Express API workspace scaffolding, aggregated Postgres schema, and ADR-027 for the 90-day backfill analytics app.
+- 0.31.0 — Added ADR-026 and introduced `ga4.events` as a webhook-first GTM/GA4 stream with raw/canonical schemas, Postgres migration, and source-aware webhook auth/routing support.
 - V0 — initial scaffold
 - V1 — CTO Vision slide deck: 16-slide AI-Native Operational Advantage presentation
 - V2 — Rewrote CLAUDE.md for the real Python/Terraform Data Streams platform

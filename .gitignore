@@ -42,6 +42,13 @@ crash.log
 .env.*
 !.env.example
 
+# Node / pnpm
+node_modules/
+
+# Build output
+apps/*/dist/
+*.tsbuildinfo
+
 # Lambda packaging
 *.zip
 

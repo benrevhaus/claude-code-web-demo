@@ -1,6 +1,6 @@
 [project]
 name = "data-streams"
-version = "0.30.0"
+version = "0.40.2"
 description = "Serverless data ingestion platform — Vendor API → S3 → Processor → Postgres"
 requires-python = ">=3.12"
 dependencies = [
