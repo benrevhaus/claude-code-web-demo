@@ -180,6 +180,14 @@ resource "aws_ssm_parameter" "shopify_webhook_secret" {
   lifecycle { ignore_changes = [value] }
 }
 
+resource "aws_ssm_parameter" "ga4_ingest_secret" {
+  name  = "/${local.prefix}/${local.env}/ga4/ingest_secret"
+  type  = "SecureString"
+  value = "PLACEHOLDER"
+
+  lifecycle { ignore_changes = [value] }
+}
+
 resource "aws_ssm_parameter" "brandhaus_connection_string" {
   name  = "/${local.prefix}/${local.env}/brandhaus/connection_string"
   type  = "SecureString"

@@ -93,15 +93,19 @@ resource "aws_apigatewayv2_integration" "sqs" {
   request_parameters = {
     QueueUrl                             = var.sqs_process_queue_url
     MessageBody                          = "$request.body"
+    "MessageAttribute.source.StringValue" = "$request.pathParameters.source"
+    "MessageAttribute.source.DataType"    = "String"
     "MessageAttribute.topic.StringValue" = "$request.pathParameters.topic"
     "MessageAttribute.topic.DataType"    = "String"
     "MessageAttribute.hmac.StringValue"  = "$request.header.X-Shopify-Hmac-Sha256"
     "MessageAttribute.hmac.DataType"     = "String"
+    "MessageAttribute.secret.StringValue" = "$request.header.X-Data-Streams-Secret"
+    "MessageAttribute.secret.DataType"    = "String"
   }
 }
 
 resource "aws_apigatewayv2_route" "webhook" {
   api_id    = aws_apigatewayv2_api.webhook.id
-  route_key = "POST /webhooks/${var.source_name}/{topic}"
+  route_key = "POST /webhooks/{source}/{topic}"
   target    = "integrations/${aws_apigatewayv2_integration.sqs.id}"
 }
