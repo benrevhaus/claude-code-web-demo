@@ -37,12 +37,27 @@ Numbered, immutable once accepted. If a decision is superseded, a new ADR replac
 | [ADR-015](adr/015-observability-cloudwatch-only.md) | CloudWatch-Only Observability for V1 | Accepted |
 | [ADR-016](adr/016-processor-strategy.md) | One Generic Processor, Schema-Driven | Accepted |
 | [ADR-017](adr/017-idempotency-strategy.md) | Idempotency via DynamoDB + Postgres Constraints | Accepted |
+| [ADR-018](adr/018-gorgias-tickets-ingestion-contract.md) | Gorgias Tickets Ingestion Contract | Accepted |
+| [ADR-019](adr/019-gorgias-get-rollout.md) | Gorgias GET Rollout | Accepted |
+| [ADR-020](adr/020-gorgias-secrets-ssm-not-secrets-manager.md) | Gorgias Secrets in SSM, Not Secrets Manager | Accepted |
+| [ADR-021](adr/021-simplify-to-single-lambda-mvp.md) | Simplify to Single-Lambda MVP, Preserve Battle-Hardened Design for Scale-Up | Accepted |
+| [ADR-022](adr/022-mvp-implementation-and-scale-up-path.md) | MVP Implementation Plan and Scale-Up Path | Accepted |
+| [ADR-023](adr/023-single-prod-environment.md) | Single Prod Environment | Accepted |
+| [ADR-024](adr/024-stream-status-lifecycle.md) | Stream Status Lifecycle — draft / ready / live | Accepted |
+| [ADR-025](adr/025-clickhouse-fargate-alb-s3-evaluation.md) | Evaluate ClickHouse + Fargate + ALB + S3 as a Unified Data Streams Platform | Accepted |
+| [ADR-026](adr/026-ga4-gtm-immediate-stream.md) | Introduce GA4/GTM Immediately as a Webhook-First Event Stream | Accepted |
+| [ADR-027](adr/027-ga4-historical-dashboard-mvp.md) | Build the Initial Data Streams Explorer GA4 View as an Aggregated Local App | Accepted |
+| [ADR-028](adr/028-ga4-dimension-coverage-and-variant-grain.md) | GA4 Dimension Coverage and Variant-Aware Aggregate Grain | Accepted |
+| [ADR-029](adr/029-ga4-event-name-normalization.md) | Normalize GA4 Event Names and Quarantine Instrumentation Noise | Accepted |
+| [ADR-030](adr/030-split-dashboard-from-data-streams.md) | Split the GA4 Dashboard Product Out of Data Streams | Accepted |
+| [ADR-031](adr/031-internal-dashboard-suite.md) | Keep Data Streams Explorer in Data Streams as a Read-Only Internal Suite Surface | Accepted |
 
 ### Specifications
 
 | Spec | Description |
 |------|-------------|
 | [Stream Spec](specs/stream-spec.md) | Standard stream definition schema (the YAML contract) |
+| [Analytics Contract](specs/analytics-contract.md) | Read contract for internal dashboard consumers over analytical datasets |
 | [Runtime Contracts](specs/runtime-contracts.md) | Input/output contracts for every Lambda role |
 | [Step Function Design](specs/step-function-design.md) | State machine definitions for polling and replay |
 | [Data Model](specs/data-model.md) | DynamoDB entities, S3 key patterns, Postgres schema |
