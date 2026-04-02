@@ -29,16 +29,17 @@ _s3_writer: S3Writer | None = None
 _pg: PgClient | None = None
 _metrics: MetricsClient | None = None
 _brandhaus: BrandhausWriter | None = None
-_webhook_secret: str | None = None
+_shopify_webhook_secret: str | None = None
+_ga4_ingest_secret: str | None = None
 
-# Topic → (source, stream) routing
-# Webhook URLs use hyphens: /webhooks/shopify/orders-create
-TOPIC_ROUTING: dict[str, tuple[str, str]] = {
-    "orders-create": ("shopify", "orders"),
-    "orders-updated": ("shopify", "orders"),
-    "customers-create": ("shopify", "customers"),
-    "customers-update": ("shopify", "customers"),
-    "customers-delete": ("shopify", "customers"),
+# (source, topic) → stream routing
+TOPIC_ROUTING: dict[tuple[str, str], str] = {
+    ("shopify", "orders-create"): "orders",
+    ("shopify", "orders-updated"): "orders",
+    ("shopify", "customers-create"): "customers",
+    ("shopify", "customers-update"): "customers",
+    ("shopify", "customers-delete"): "customers",
+    ("ga4", "events"): "events",
 }
 
 
@@ -72,14 +73,24 @@ def _get_brandhaus() -> BrandhausWriter | None:
     return _brandhaus
 
 
-def _get_webhook_secret() -> str:
-    global _webhook_secret
-    if _webhook_secret is None:
+def _get_shopify_webhook_secret() -> str:
+    global _shopify_webhook_secret
+    if _shopify_webhook_secret is None:
         env = os.environ.get("ENV", "dev")
         prefix = os.environ.get("PARAM_PREFIX", "data-streams")
         param = f"/{prefix}/{env}/shopify/webhook_secret"
-        _webhook_secret = get_env_or_ssm("SHOPIFY_WEBHOOK_SECRET", param)
-    return _webhook_secret
+        _shopify_webhook_secret = get_env_or_ssm("SHOPIFY_WEBHOOK_SECRET", param)
+    return _shopify_webhook_secret
+
+
+def _get_ga4_ingest_secret() -> str:
+    global _ga4_ingest_secret
+    if _ga4_ingest_secret is None:
+        env = os.environ.get("ENV", "dev")
+        prefix = os.environ.get("PARAM_PREFIX", "data-streams")
+        param = f"/{prefix}/{env}/ga4/ingest_secret"
+        _ga4_ingest_secret = get_env_or_ssm("GA4_INGEST_SECRET", param)
+    return _ga4_ingest_secret
 
 
 def _validate_hmac(body: str, expected_hmac: str, secret: str) -> bool:
@@ -102,51 +113,65 @@ def handler(event: dict, context=None) -> dict:
     pg = _get_pg()
     brandhaus = _get_brandhaus()
     metrics = _get_metrics()
-    store_id = os.environ.get("SHOPIFY_STORE_ID", "")
 
-    if not store_id:
-        log.error("SHOPIFY_STORE_ID env var is not set")
+    shopify_store_id = os.environ.get("SHOPIFY_STORE_ID", "")
 
     for sqs_record in records:
         message_id = sqs_record.get("messageId", "")
         try:
             # Extract topic and HMAC from SQS message attributes
             msg_attrs = sqs_record.get("messageAttributes", {})
+            source = (msg_attrs.get("source", {}).get("stringValue") or "").strip()
             topic = (msg_attrs.get("topic", {}).get("stringValue") or "").strip()
             hmac_header = (msg_attrs.get("hmac", {}).get("stringValue") or "").strip()
+            shared_secret = (msg_attrs.get("secret", {}).get("stringValue") or "").strip()
             raw_body = sqs_record.get("body", "")
 
-            if not topic:
-                log.warning("Missing topic in SQS message attributes", message_id=message_id)
+            if not source or not topic:
+                log.warning("Missing source or topic in SQS message attributes", message_id=message_id)
                 failed += 1
                 failed_message_ids.append(message_id)
                 continue
 
-            # Route topic to (source, stream)
-            route = TOPIC_ROUTING.get(topic)
-            if route is None:
-                log.warning("Unknown webhook topic", topic=topic, message_id=message_id)
+            stream = TOPIC_ROUTING.get((source, topic))
+            if stream is None:
+                log.warning("Unknown webhook topic", source=source, topic=topic, message_id=message_id)
                 failed += 1
                 failed_message_ids.append(message_id)
                 continue
-            source, stream = route
 
-            # Validate HMAC — reject if missing or invalid
-            secret = _get_webhook_secret()
-            if not hmac_header:
-                log.error("Missing HMAC header — rejecting webhook", topic=topic, message_id=message_id)
-                failed += 1
-                failed_message_ids.append(message_id)
-                continue
-            if not _validate_hmac(raw_body, hmac_header, secret):
-                log.error("HMAC validation failed", topic=topic, message_id=message_id)
-                failed += 1
-                failed_message_ids.append(message_id)
-                continue
+            if source == "shopify":
+                if not shopify_store_id:
+                    log.error("SHOPIFY_STORE_ID env var is not set")
+                    failed += 1
+                    failed_message_ids.append(message_id)
+                    continue
+                if not hmac_header:
+                    log.error("Missing HMAC header — rejecting webhook", topic=topic, message_id=message_id)
+                    failed += 1
+                    failed_message_ids.append(message_id)
+                    continue
+                secret = _get_shopify_webhook_secret()
+                if not _validate_hmac(raw_body, hmac_header, secret):
+                    log.error("HMAC validation failed", topic=topic, message_id=message_id)
+                    failed += 1
+                    failed_message_ids.append(message_id)
+                    continue
+            elif source == "ga4":
+                expected_secret = _get_ga4_ingest_secret()
+                if not shared_secret or shared_secret != expected_secret:
+                    log.error("GA4 ingest secret validation failed", topic=topic, message_id=message_id)
+                    failed += 1
+                    failed_message_ids.append(message_id)
+                    continue
 
             # Parse the webhook payload
             payload = json.loads(raw_body)
             webhook_id = str(uuid.uuid4())
+            if source == "shopify":
+                store_id = shopify_store_id
+            else:
+                store_id = str(payload.get("property_id") or payload.get("measurement_id") or "ga4")
 
             # Write raw to S3 (all topics, including customer deletes — immutable audit trail)
             s3_key = s3.build_webhook_key(
@@ -168,7 +193,7 @@ def handler(event: dict, context=None) -> dict:
             )
 
             # Handle customer deletion specially
-            if topic == "customers-delete":
+            if source == "shopify" and topic == "customers-delete":
                 customer_id = payload.get("id")
                 if not customer_id or not store_id:
                     log.error("Customer delete missing id or store_id", customer_id=customer_id, message_id=message_id)
@@ -215,7 +240,9 @@ def handler(event: dict, context=None) -> dict:
             # Dual-write to brandhaus (best-effort — never affects primary processing)
             if brandhaus:
                 try:
-                    brandhaus.write_raw(source, stream, raw_record.id, payload)
+                    record_id = getattr(raw_record, "id", None) or getattr(canonical, "id", None)
+                    if record_id is not None:
+                        brandhaus.write_raw(source, stream, record_id, payload)
                     for sub in schema.sub_streams:
                         for item in getattr(raw_record, sub.extract_field, None) or []:
                             if isinstance(item, dict) and item.get("id") is not None:
@@ -244,7 +271,7 @@ def handler(event: dict, context=None) -> dict:
                 brandhaus.rollback()
 
     # Emit metrics
-    metrics.emit_records("shopify", "webhooks", processed, 0, failed)
+    metrics.emit_records("webhooks", "all", processed, 0, failed)
 
     log.info("Batch complete", processed=processed, failed=failed, total=len(records))
 

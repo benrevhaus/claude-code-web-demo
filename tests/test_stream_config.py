@@ -43,6 +43,16 @@ class TestStreamConfigParsing:
         assert config.has_polling is True
         assert config.has_webhook is True
 
+    def test_load_ga4_events_yaml(self):
+        config = load_stream_config("streams/ga4-events.yaml")
+        assert config.source == "ga4"
+        assert config.stream == "events"
+        assert config.mode == StreamMode.WEBHOOK
+        assert config.schema_version == "ga4.event.v1"
+        assert config.has_polling is False
+        assert config.has_webhook is True
+        assert config.webhook_topics == ["events"]
+
     def test_stream_key(self):
         config = load_stream_config("streams/shopify-orders.yaml")
         assert config.stream_key == "shopify#orders"

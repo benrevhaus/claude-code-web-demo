@@ -531,6 +531,90 @@ class PgClient:
         with self._conn.cursor() as cur:
             cur.execute(sql, params)
 
+    # ── GA4 Events ───────────────────────────────────────────────────────
+
+    def upsert_ga4_event(self, event: BaseModel, s3_key: str, schema_version: str, run_id: Optional[str] = None) -> bool:
+        self._ensure_connection()
+        data = event.model_dump()
+        sql = """
+            INSERT INTO ga4.events (
+                id, store_id, event_name, event_timestamp,
+                client_id, user_id, session_id,
+                measurement_id, property_id, source_platform,
+                page_location, page_referrer, gtm_container_id,
+                params, items, user_properties,
+                raw_s3_key, schema_version, run_id
+            ) VALUES (
+                %(id)s, %(store_id)s, %(event_name)s, %(event_timestamp)s,
+                %(client_id)s, %(user_id)s, %(session_id)s,
+                %(measurement_id)s, %(property_id)s, %(source_platform)s,
+                %(page_location)s, %(page_referrer)s, %(gtm_container_id)s,
+                %(params)s, %(items)s, %(user_properties)s,
+                %(raw_s3_key)s, %(schema_version)s, %(run_id)s
+            )
+            ON CONFLICT (id, store_id) DO UPDATE SET
+                event_name = EXCLUDED.event_name,
+                event_timestamp = EXCLUDED.event_timestamp,
+                client_id = EXCLUDED.client_id,
+                user_id = EXCLUDED.user_id,
+                session_id = EXCLUDED.session_id,
+                measurement_id = EXCLUDED.measurement_id,
+                property_id = EXCLUDED.property_id,
+                source_platform = EXCLUDED.source_platform,
+                page_location = EXCLUDED.page_location,
+                page_referrer = EXCLUDED.page_referrer,
+                gtm_container_id = EXCLUDED.gtm_container_id,
+                params = EXCLUDED.params,
+                items = EXCLUDED.items,
+                user_properties = EXCLUDED.user_properties,
+                raw_s3_key = EXCLUDED.raw_s3_key,
+                schema_version = EXCLUDED.schema_version,
+                ingested_at = NOW(),
+                run_id = EXCLUDED.run_id
+        """
+        params = {
+            "id": data["id"],
+            "store_id": data["store_id"],
+            "event_name": data["event_name"],
+            "event_timestamp": data["event_timestamp"],
+            "client_id": data.get("client_id"),
+            "user_id": data.get("user_id"),
+            "session_id": data.get("session_id"),
+            "measurement_id": data.get("measurement_id"),
+            "property_id": data.get("property_id"),
+            "source_platform": data.get("source_platform"),
+            "page_location": data.get("page_location"),
+            "page_referrer": data.get("page_referrer"),
+            "gtm_container_id": data.get("gtm_container_id"),
+            "params": json.dumps(data.get("params")) if data.get("params") else None,
+            "items": json.dumps(data.get("items")) if data.get("items") else None,
+            "user_properties": json.dumps(data.get("user_properties")) if data.get("user_properties") else None,
+            "raw_s3_key": s3_key,
+            "schema_version": schema_version,
+            "run_id": run_id,
+        }
+        with self._conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.rowcount > 0
+
+    def insert_ga4_event_history(self, event: BaseModel, run_id: Optional[str] = None) -> None:
+        self._ensure_connection()
+        data = event.model_dump()
+        sql = """
+            INSERT INTO ga4.events_history (event_id, store_id, snapshot, changed_at, run_id)
+            VALUES (%(event_id)s, %(store_id)s, %(snapshot)s, %(changed_at)s, %(run_id)s)
+            ON CONFLICT (event_id, store_id, changed_at) DO NOTHING
+        """
+        params = {
+            "event_id": data["id"],
+            "store_id": data["store_id"],
+            "snapshot": json.dumps(data, default=str),
+            "changed_at": data["event_timestamp"],
+            "run_id": run_id,
+        }
+        with self._conn.cursor() as cur:
+            cur.execute(sql, params)
+
     # ── MVP cursor storage (ADR-022) ──────────────────────────────────────
 
     def get_stream_cursor(self, source: str, stream: str, store_id: str) -> str | None:

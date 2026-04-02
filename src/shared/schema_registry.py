@@ -6,6 +6,8 @@ Adding a new stream = add an entry here + create the schema files.
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from schemas.canonical.ga4.event_v1 import GA4EventV1
+from schemas.canonical.ga4.transforms import transform_ga4_event
 from schemas.canonical.gorgias.ticket_v1 import GorgiasTicketV1
 from schemas.canonical.gorgias.transforms import transform_gorgias_ticket
 from schemas.canonical.shopify.customer_v1 import ShopifyCustomerV1
@@ -22,6 +24,7 @@ from schemas.canonical.shopify.transforms import (
     transform_shopify_refund,
     transform_shopify_transaction,
 )
+from schemas.raw.ga4.event import GA4EventRaw, GA4EventsPageRaw
 from schemas.raw.gorgias.ticket import GorgiasTicketRaw, GorgiasTicketsPageRaw
 from schemas.raw.shopify.customer import ShopifyCustomerRaw, ShopifyCustomersPageRaw
 from schemas.raw.shopify.inventory import ShopifyInventoryItemRaw, ShopifyInventoryPageRaw
@@ -167,6 +170,19 @@ SCHEMA_REGISTRY: dict[tuple[str, str], SchemaEntry] = {
         idempotency_field_map={"ticket_id": "id", "updated_datetime": "updated_datetime"},
         pg_upsert_method="upsert_ticket",
         pg_history_method="insert_ticket_history",
+    ),
+    ("ga4", "events"): SchemaEntry(
+        raw_model=GA4EventRaw,
+        raw_page_model=GA4EventsPageRaw,
+        canonical_model=GA4EventV1,
+        transform=transform_ga4_event,
+        pg_table="ga4.events",
+        pg_history_table="ga4.events_history",
+        version="ga4.event.v1",
+        record_list_field="events",
+        idempotency_field_map={"event_id": "id", "event_timestamp": "event_timestamp"},
+        pg_upsert_method="upsert_ga4_event",
+        pg_history_method="insert_ga4_event_history",
     ),
 }
 
