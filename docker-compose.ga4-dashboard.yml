@@ -1,0 +1,15 @@
+services:
+  ga4-dashboard-postgres:
+    image: postgres:16-alpine
+    container_name: ga4-dashboard-postgres
+    ports:
+      - "5440:5432"
+    environment:
+      POSTGRES_DB: ga4_dashboard
+      POSTGRES_USER: ga4_dashboard
+      POSTGRES_PASSWORD: ga4_dashboard
+    volumes:
+      - ga4_dashboard_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  ga4_dashboard_postgres_data:

@@ -1,0 +1,16 @@
+{
+  "name": "data-streams-explorer-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.17.1",
+  "scripts": {
+    "dev": "concurrently \"pnpm --filter @data-streams/api dev\" \"pnpm --filter @data-streams/web dev\"",
+    "dev:api": "pnpm --filter @data-streams/api dev",
+    "dev:web": "pnpm --filter @data-streams/web dev",
+    "build": "pnpm --filter @data-streams/api build && pnpm --filter @data-streams/web build",
+    "db:migrate": "pnpm --filter @data-streams/api db:migrate",
+    "db:seed:mock": "pnpm --filter @data-streams/api db:seed:mock"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
