@@ -282,9 +282,17 @@ class YotpoClient:
             next_page_cursor = None
             has_more = False
 
-        durable_checkpoint = checkpoint
+        # Always set a durable checkpoint so the handler can save progress.
+        # For mid-backfill runs that hit max_pages, this encodes the current
+        # position (product_index:page) so the next run resumes here.
         if not has_more:
+            # Completed all products — checkpoint is the high water timestamp
             durable_checkpoint = new_high_water
+        elif next_page_cursor:
+            # Mid-backfill — checkpoint is the current position
+            durable_checkpoint = encode_cursor_state(checkpoint, next_page_cursor, new_high_water)
+        else:
+            durable_checkpoint = checkpoint
 
         next_cursor = None
         if has_more:
