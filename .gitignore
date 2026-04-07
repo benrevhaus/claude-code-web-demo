@@ -54,6 +54,7 @@ apps/*/dist/
 
 # Lambda packaging
 *.zip
+!infra/modules/stream-webhook/router.zip
 
 # dual_ai_checker run artifacts
 scripts/.dual_ai_rounds/

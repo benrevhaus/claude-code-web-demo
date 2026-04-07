@@ -120,6 +120,7 @@ def handler(event: dict, context=None) -> dict:
         message_id = sqs_record.get("messageId", "")
         try:
             # Extract topic and HMAC from SQS message attributes
+            # (set by the webhook-router Lambda from API Gateway path/headers)
             msg_attrs = sqs_record.get("messageAttributes", {})
             source = (msg_attrs.get("source", {}).get("stringValue") or "").strip()
             topic = (msg_attrs.get("topic", {}).get("stringValue") or "").strip()

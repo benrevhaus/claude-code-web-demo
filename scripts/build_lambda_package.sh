@@ -11,9 +11,10 @@ mkdir -p "${PACKAGE_DIR}"
 
 docker run --rm \
   --platform linux/amd64 \
+  --entrypoint bash \
   -v "${ROOT_DIR}:/workspace" \
   public.ecr.aws/lambda/python:3.12 \
-  bash -lc "
+  -lc "
     set -euo pipefail
     pip install --upgrade pip
     pip install /workspace -t /workspace/dist/lambda/package

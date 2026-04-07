@@ -1,5 +1,9 @@
-# stream-webhook: API Gateway + SQS integration for webhook ingestion.
-# Provisioned in V1 as a stub — full webhook Lambda wired in Phase 2.
+# stream-webhook: API Gateway → routing Lambda → SQS for webhook ingestion.
+#
+# The HTTP API SQS-SendMessage direct integration does not support dynamic
+# MessageAttributes from path parameters or headers. A thin routing Lambda
+# bridges the gap: it extracts source, topic, HMAC, and secret from the
+# HTTP request and sends to SQS with proper message attributes.
 
 terraform {
   required_version = ">= 1.5"
@@ -17,7 +21,7 @@ locals {
 }
 
 # -----------------------------------------------------------------------------
-# API Gateway (HTTP API — lightweight, low-cost)
+# API Gateway (HTTP API)
 # -----------------------------------------------------------------------------
 
 resource "aws_apigatewayv2_api" "webhook" {
@@ -53,59 +57,98 @@ resource "aws_cloudwatch_log_group" "apigw" {
   tags              = var.tags
 }
 
-# SQS integration — API Gateway pushes directly to SQS (no Lambda needed for ingestion)
-resource "aws_iam_role" "apigw_sqs" {
-  name = "${local.prefix}-apigw-sqs-${var.env}"
+# -----------------------------------------------------------------------------
+# Routing Lambda — extracts path/header metadata, sends to SQS
+# -----------------------------------------------------------------------------
+
+resource "aws_iam_role" "webhook_router" {
+  name = "${local.prefix}-webhook-router-${var.env}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Action    = "sts:AssumeRole"
       Effect    = "Allow"
-      Principal = { Service = "apigateway.amazonaws.com" }
+      Principal = { Service = "lambda.amazonaws.com" }
     }]
   })
 
   tags = var.tags
 }
 
-resource "aws_iam_role_policy" "apigw_sqs" {
-  name = "sqs-send"
-  role = aws_iam_role.apigw_sqs.id
+resource "aws_iam_role_policy" "webhook_router" {
+  name = "webhook-router-policy"
+  role = aws_iam_role.webhook_router.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["sqs:SendMessage"]
-      Resource = [var.sqs_process_queue_arn]
-    }]
+    Statement = [
+      {
+        Sid      = "SQS"
+        Effect   = "Allow"
+        Action   = ["sqs:SendMessage"]
+        Resource = [var.sqs_process_queue_arn]
+      },
+      {
+        Sid      = "Logs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "arn:aws:logs:*:*:*"
+      },
+    ]
   })
 }
 
-resource "aws_apigatewayv2_integration" "sqs" {
+resource "aws_cloudwatch_log_group" "webhook_router" {
+  name              = "/aws/lambda/${local.prefix}-webhook-router-${var.env}"
+  retention_in_days = 14
+  tags              = var.tags
+}
+
+# Inline Python — no deployment package needed. Extracts routing metadata
+# from the HTTP request and forwards to SQS with message attributes.
+resource "aws_lambda_function" "webhook_router" {
+  function_name = "${local.prefix}-webhook-router-${var.env}"
+  role          = aws_iam_role.webhook_router.arn
+  handler       = "index.handler"
+  runtime       = "python3.12"
+  timeout       = 10
+  memory_size   = 128
+
+  filename = "${path.module}/router.zip"
+
+  environment {
+    variables = {
+      SQS_QUEUE_URL = var.sqs_process_queue_url
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_group.webhook_router]
+
+  tags = var.tags
+}
+
+resource "aws_lambda_permission" "apigw_invoke_router" {
+  statement_id  = "AllowAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.webhook_router.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.webhook.execution_arn}/*/*"
+}
+
+# -----------------------------------------------------------------------------
+# Integration — API Gateway → routing Lambda
+# -----------------------------------------------------------------------------
+
+resource "aws_apigatewayv2_integration" "lambda" {
   api_id                 = aws_apigatewayv2_api.webhook.id
   integration_type       = "AWS_PROXY"
-  integration_subtype    = "SQS-SendMessage"
-  credentials_arn        = aws_iam_role.apigw_sqs.arn
-  payload_format_version = "1.0"
-
-  request_parameters = {
-    QueueUrl                             = var.sqs_process_queue_url
-    MessageBody                          = "$request.body"
-    "MessageAttribute.source.StringValue" = "$request.pathParameters.source"
-    "MessageAttribute.source.DataType"    = "String"
-    "MessageAttribute.topic.StringValue" = "$request.pathParameters.topic"
-    "MessageAttribute.topic.DataType"    = "String"
-    "MessageAttribute.hmac.StringValue"  = "$request.header.X-Shopify-Hmac-Sha256"
-    "MessageAttribute.hmac.DataType"     = "String"
-    "MessageAttribute.secret.StringValue" = "$request.header.X-Data-Streams-Secret"
-    "MessageAttribute.secret.DataType"    = "String"
-  }
+  integration_uri        = aws_lambda_function.webhook_router.invoke_arn
+  payload_format_version = "2.0"
 }
 
 resource "aws_apigatewayv2_route" "webhook" {
   api_id    = aws_apigatewayv2_api.webhook.id
   route_key = "POST /webhooks/{source}/{topic}"
-  target    = "integrations/${aws_apigatewayv2_integration.sqs.id}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }

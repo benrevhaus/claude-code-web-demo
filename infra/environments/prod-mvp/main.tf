@@ -67,6 +67,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "raw" {
   rule {
     id     = "glacier-transition"
     status = "Enabled"
+    filter {}
 
     transition {
       days          = 90
@@ -131,7 +132,7 @@ resource "aws_rds_cluster" "main" {
   cluster_identifier        = "${local.prefix}-${local.env}"
   engine                    = "aurora-postgresql"
   engine_mode               = "provisioned"
-  engine_version            = "15.4"
+  engine_version            = "16.6"
   database_name             = "datastreams"
   master_username           = "datastreams"
   master_password           = var.db_master_password
