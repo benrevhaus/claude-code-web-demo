@@ -41,6 +41,9 @@ crash.log
 .env
 .env.*
 !.env.example
+credentials/
+*-key.json
+*-credentials.json
 
 # Node / pnpm
 node_modules/

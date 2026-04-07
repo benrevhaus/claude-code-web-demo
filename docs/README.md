@@ -51,6 +51,8 @@ Numbered, immutable once accepted. If a decision is superseded, a new ADR replac
 | [ADR-029](adr/029-ga4-event-name-normalization.md) | Normalize GA4 Event Names and Quarantine Instrumentation Noise | Accepted |
 | [ADR-030](adr/030-split-dashboard-from-data-streams.md) | Split the GA4 Dashboard Product Out of Data Streams | Accepted |
 | [ADR-031](adr/031-internal-dashboard-suite.md) | Keep Data Streams Explorer in Data Streams as a Read-Only Internal Suite Surface | Accepted |
+| [ADR-032](adr/032-parameterized-event-splitting.md) | Split Parameterized Events by Their Primary GA4 Dimension | Accepted |
+| [ADR-033](adr/033-source-pure-review-streams-and-generalized-publication.md) | Keep Review Source Streams Pure, Publish a Generalized Review Layer | Accepted |
 
 ### Specifications
 
@@ -62,6 +64,9 @@ Numbered, immutable once accepted. If a decision is superseded, a new ADR replac
 | [Step Function Design](specs/step-function-design.md) | State machine definitions for polling and replay |
 | [Data Model](specs/data-model.md) | DynamoDB entities, S3 key patterns, Postgres schema |
 | [Failure Modes](specs/failure-modes.md) | Known failure modes with symptoms, causes, and recovery |
+| [Generalized Reviews Contract](specs/generalized-reviews-contract.md) | Phase 1 provider-agnostic published review contract, restricted identity boundary, and audit model |
+| [Review Stream Implementation Guide](specs/review-stream-implementation-guide.md) | Implementation-grade build order, table responsibilities, publication logic, and reusable rules for future review streams |
+| [Yotpo Reviews Phase 1](specs/yotpo-reviews-stream.md) | Yotpo-specific source stream, publication, baseline, and generalized review implementation plan |
 
 ### Guides
 

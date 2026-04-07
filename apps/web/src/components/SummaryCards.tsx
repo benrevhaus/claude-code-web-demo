@@ -8,13 +8,29 @@ type Props = {
     distinctEvents: number;
   } | null;
   latestSync: {
+    sync_type: string;
     status: string;
     started_at: string;
     finished_at: string | null;
+    days_back: number;
     pages_rows: number;
     events_rows: number;
+    pages_new: number;
+    pages_changed: number;
+    events_new: number;
+    events_changed: number;
   } | null;
 };
+
+function formatTimestamp(iso: string) {
+  const date = new Date(iso);
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 export function SummaryCards({ summary, latestSync }: Props) {
   const cards = summary
@@ -38,12 +54,31 @@ export function SummaryCards({ summary, latestSync }: Props) {
       ))}
       <article className="summary-card sync-card">
         <span>Latest Sync</span>
-        <strong>{latestSync?.status ?? "none"}</strong>
-        <small>
-          {latestSync
-            ? `${latestSync.pages_rows} page rows, ${latestSync.events_rows} event rows`
-            : "Run a backfill to populate data"}
-        </small>
+        {latestSync ? (
+          <>
+            <strong>{formatTimestamp(latestSync.finished_at ?? latestSync.started_at)}</strong>
+            <small>
+              {latestSync.events_new != null ? (
+                <>
+                  {latestSync.events_new.toLocaleString()} new, {latestSync.events_changed.toLocaleString()} changed
+                  {" — "}
+                  {(latestSync.events_rows - latestSync.events_new - latestSync.events_changed).toLocaleString()} unchanged
+                </>
+              ) : (
+                <>{latestSync.events_rows.toLocaleString()} events synced</>
+              )}
+            </small>
+            <small className="muted">
+              {latestSync.sync_type === "incremental_sync" ? "incremental" : "full backfill"}
+              {` — last ${latestSync.days_back} days of GA4 data`}
+            </small>
+          </>
+        ) : (
+          <>
+            <strong>none</strong>
+            <small>Run a backfill to populate data</small>
+          </>
+        )}
       </article>
     </section>
   );

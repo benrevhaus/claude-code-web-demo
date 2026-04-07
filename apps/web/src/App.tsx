@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Routes, Route, useNavigate, Navigate } from "react-router-dom";
 
 import { ColumnPicker } from "./components/ColumnPicker";
 import { DataTable } from "./components/DataTable";
@@ -25,11 +26,19 @@ type SummaryResponse = {
   } | null;
 };
 
+type IgnoredSummary = {
+  rowCount: number;
+  eventCount: number;
+  sessions: number;
+  totalUsers: number;
+};
+
 type PagedResponse<T> = {
   page: number;
   pageSize: number;
   total: number;
   rows: T[];
+  ignored?: IgnoredSummary;
 };
 
 type FilterOptions = {
@@ -63,9 +72,11 @@ type EventRow = {
   raw_event_name?: string;
   event_class?: string;
   derived_page_path?: string;
+  event_param_value?: string;
   device_category: string;
   source_medium: string;
   is_conversion_event?: boolean;
+  page_users: number;
   event_count: number;
   sessions: number;
   total_users: number;
@@ -75,8 +86,6 @@ type SortState = {
   sortBy: string;
   sortDirection: "asc" | "desc";
 };
-
-type ExplorerView = "home" | "ga4";
 
 const today = new Date();
 const thirtyDaysAgo = new Date(today.getTime() - 29 * 24 * 60 * 60 * 1000);
@@ -91,7 +100,15 @@ const defaultEventNames = [
   "view_search_results",
   "carousel_slide",
   "carousel_thumbnail_click",
-  "scroll_depth",
+  "scroll_depth_25",
+  "scroll_depth_50",
+  "scroll_depth_75",
+  "scroll_depth_90",
+  "time_on_site_10",
+  "time_on_site_30",
+  "time_on_site_60",
+  "time_on_site_120",
+  "time_on_site_300",
   "click",
   "show_more",
   "show_less",
@@ -117,7 +134,6 @@ const defaultFilters: Filters = {
 };
 
 const storageKey = "data-streams-explorer-saved-searches";
-const activeViewKey = "data-streams-explorer-active-view";
 const activeTabKey = "data-streams-explorer-active-tab";
 const pageColumnsKey = "data-streams-explorer-page-columns";
 const eventColumnsKey = "data-streams-explorer-event-columns";
@@ -134,9 +150,13 @@ const pageColumns = [
   { key: "event_count", label: "Events", sortable: true },
 ] as const;
 
-const eventColumns = [
+const fmtRate = (n: number) => (n * 100).toFixed(1) + "%";
+const fmtRatio = (n: number) => n.toFixed(2);
+
+const eventColumns: readonly { key: string; label: string; sortable?: boolean; render?: (row: EventRow) => React.ReactNode }[] = [
   { key: "date_pst", label: "Date", sortable: true },
   { key: "event_name", label: "Event", sortable: true },
+  { key: "event_param_value", label: "Param Value" },
   { key: "raw_event_name", label: "Raw Event" },
   { key: "event_class", label: "Class", sortable: true },
   { key: "derived_page_path", label: "Derived Path" },
@@ -146,10 +166,42 @@ const eventColumns = [
   { key: "event_count", label: "Event Count", sortable: true },
   { key: "sessions", label: "Sessions", sortable: true },
   { key: "total_users", label: "Users", sortable: true },
+  { key: "page_users", label: "Page Users", sortable: true },
+  { key: "ev_per_user", label: "Ev/User", render: (row) => fmtRatio(Number(row.total_users) > 0 ? Number(row.event_count) / Number(row.total_users) : 0) },
+  { key: "sess_per_user", label: "Sess/User", render: (row) => fmtRatio(Number(row.total_users) > 0 ? Number(row.sessions) / Number(row.total_users) : 0) },
+  { key: "user_rate", label: "User Rate", render: (row) => Number(row.page_users) > 0 ? fmtRate(Number(row.total_users) / Number(row.page_users)) : "—" },
 ] as const;
 
-export default function App() {
-  const [activeView, setActiveView] = useState<ExplorerView>("home");
+function Home() {
+  const navigate = useNavigate();
+
+  return (
+    <main className="app-shell">
+      <header className="hero hero--stacked">
+        <div>
+          <span className="eyebrow-link">Data Streams Explorer</span>
+          <h1>Choose a stream</h1>
+          <p className="muted">
+            Internal read-only explorer for stream quality, analytical slices, and cross-stream inspection.
+          </p>
+        </div>
+      </header>
+
+      <section className="stream-grid">
+        <button className="stream-card" onClick={() => navigate("/ga4-stream")}>
+          <span className="stream-card__eyebrow">Available Now</span>
+          <strong>GA4 Stream View</strong>
+          <span>
+            Historical GA4 activity by date, page, event, device, and source / medium with grouped read views.
+          </span>
+        </button>
+      </section>
+    </main>
+  );
+}
+
+function GA4StreamView() {
+  const navigate = useNavigate();
   const [tab, setTab] = useState<"pages" | "events">("pages");
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
@@ -180,10 +232,6 @@ export default function App() {
   const queryBase = useMemo(() => ({ ...filters }), [filters]);
 
   useEffect(() => {
-    const savedView = localStorage.getItem(activeViewKey);
-    if (savedView === "home" || savedView === "ga4") {
-      setActiveView(savedView);
-    }
     const savedTab = localStorage.getItem(activeTabKey);
     if (savedTab === "pages" || savedTab === "events") {
       setTab(savedTab);
@@ -194,37 +242,33 @@ export default function App() {
     }
     const savedPageColumns = localStorage.getItem(pageColumnsKey);
     if (savedPageColumns) {
-      setVisiblePageColumns(JSON.parse(savedPageColumns));
+      const saved: string[] = JSON.parse(savedPageColumns);
+      const allKeys = new Set<string>(pageColumns.map((c) => c.key));
+      const newKeys = pageColumns.filter((c) => !saved.includes(c.key as string)).map((c) => c.key as string);
+      setVisiblePageColumns([...saved.filter((k) => allKeys.has(k)), ...newKeys]);
     }
     const savedEventColumns = localStorage.getItem(eventColumnsKey);
     if (savedEventColumns) {
-      setVisibleEventColumns(JSON.parse(savedEventColumns));
+      const saved: string[] = JSON.parse(savedEventColumns);
+      const allKeys = new Set<string>(eventColumns.map((c) => c.key));
+      const newKeys = eventColumns.filter((c) => !saved.includes(c.key as string)).map((c) => c.key as string);
+      setVisibleEventColumns([...saved.filter((k) => allKeys.has(k)), ...newKeys]);
     }
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem(activeViewKey, activeView);
-  }, [activeView]);
 
   useEffect(() => {
     localStorage.setItem(activeTabKey, tab);
   }, [tab]);
 
   useEffect(() => {
-    if (activeView !== "ga4") {
-      return;
-    }
     async function loadFilterOptions() {
       const data = await fetchJson<FilterOptions>("/filters");
       setFilterOptions(data);
     }
     loadFilterOptions().catch((loadError) => setError(String(loadError)));
-  }, [activeView]);
+  }, []);
 
   useEffect(() => {
-    if (activeView !== "ga4") {
-      return;
-    }
     async function loadSummary() {
       setIsLoadingSummary(true);
       const data = await fetchJson<SummaryResponse>("/summary", queryBase);
@@ -235,12 +279,9 @@ export default function App() {
       setError(String(loadError));
       setIsLoadingSummary(false);
     });
-  }, [activeView, queryBase]);
+  }, [queryBase]);
 
   useEffect(() => {
-    if (activeView !== "ga4") {
-      return;
-    }
     async function loadPages() {
       setIsLoadingPages(true);
       const data = await fetchJson<PagedResponse<PageRow>>("/pages", {
@@ -256,12 +297,9 @@ export default function App() {
       setError(String(loadError));
       setIsLoadingPages(false);
     });
-  }, [activeView, queryBase, pagesSort, pagesPage]);
+  }, [queryBase, pagesSort, pagesPage]);
 
   useEffect(() => {
-    if (activeView !== "ga4") {
-      return;
-    }
     async function loadEvents() {
       setIsLoadingEvents(true);
       const data = await fetchJson<PagedResponse<EventRow>>("/events", {
@@ -277,7 +315,7 @@ export default function App() {
       setError(String(loadError));
       setIsLoadingEvents(false);
     });
-  }, [activeView, queryBase, eventsSort, eventsPage]);
+  }, [queryBase, eventsSort, eventsPage]);
 
   function updateFilters(patch: Partial<Filters>) {
     setFilters((current) => ({ ...current, ...patch }));
@@ -374,8 +412,30 @@ export default function App() {
     filters.search ? `Search: ${filters.search}` : null,
   ].filter(Boolean) as string[];
 
-  const visiblePageColumnDefs = pageColumns.filter((column) => visiblePageColumns.includes(column.key));
-  const visibleEventColumnDefs = eventColumns.filter((column) => visibleEventColumns.includes(column.key));
+  // When grouped, hide dimension columns that aren't the group key — they'd show
+  // arbitrary values from the aggregated rows, which is misleading.
+  const groupBy = filters.groupBy ?? "detail";
+  const relevantPageColumns = groupBy === "detail"
+    ? pageColumns
+    : pageColumns.filter((col) => {
+        if (groupBy === "page") return col.key !== "device_category" && col.key !== "source_medium";
+        if (groupBy === "device") return col.key !== "page_path" && col.key !== "page_title" && col.key !== "source_medium";
+        if (groupBy === "source_medium") return col.key !== "page_path" && col.key !== "page_title" && col.key !== "device_category";
+        if (groupBy === "event") return col.key !== "page_path" && col.key !== "page_title" && col.key !== "device_category" && col.key !== "source_medium";
+        return true;
+      });
+  const relevantEventColumns = groupBy === "detail"
+    ? eventColumns
+    : eventColumns.filter((col) => {
+        if (groupBy === "page") return col.key !== "device_category" && col.key !== "source_medium";
+        if (groupBy === "device") return col.key !== "page_path" && col.key !== "derived_page_path" && col.key !== "source_medium";
+        if (groupBy === "source_medium") return col.key !== "page_path" && col.key !== "derived_page_path" && col.key !== "device_category";
+        if (groupBy === "event") return col.key !== "page_path" && col.key !== "derived_page_path" && col.key !== "device_category" && col.key !== "source_medium";
+        return true;
+      });
+
+  const visiblePageColumnDefs = relevantPageColumns.filter((column) => visiblePageColumns.includes(column.key));
+  const visibleEventColumnDefs = relevantEventColumns.filter((column) => visibleEventColumns.includes(column.key));
 
   async function runBackfill() {
     try {
@@ -397,39 +457,11 @@ export default function App() {
     }
   }
 
-  if (activeView === "home") {
-    return (
-      <main className="app-shell">
-        <header className="hero hero--stacked">
-          <div>
-            <button className="eyebrow-link" onClick={() => setActiveView("home")}>
-              Data Streams Explorer
-            </button>
-            <h1>Choose a stream</h1>
-            <p className="muted">
-              Internal read-only explorer for stream quality, analytical slices, and cross-stream inspection.
-            </p>
-          </div>
-        </header>
-
-        <section className="stream-grid">
-          <button className="stream-card" onClick={() => setActiveView("ga4")}>
-            <span className="stream-card__eyebrow">Available Now</span>
-            <strong>GA4 Stream View</strong>
-            <span>
-              Historical GA4 activity by date, page, event, device, and source / medium with grouped read views.
-            </span>
-          </button>
-        </section>
-      </main>
-    );
-  }
-
   return (
     <main className="app-shell">
       <header className="hero">
         <div>
-          <button className="eyebrow-link" onClick={() => setActiveView("home")}>
+          <button className="eyebrow-link" onClick={() => navigate("/")}>
             Data Streams Explorer
           </button>
           <h1>GA4 stream view</h1>
@@ -438,7 +470,7 @@ export default function App() {
           </p>
         </div>
         <div className="actions-inline">
-          <button className="ghost" onClick={() => setActiveView("home")}>
+          <button className="ghost" onClick={() => navigate("/")}>
             All streams
           </button>
           <button onClick={runBackfill} disabled={isSyncing}>
@@ -502,9 +534,9 @@ export default function App() {
       {tab === "pages" ? (
         <ColumnPicker
           title="Visible Columns"
-          columns={pageColumns.map((column) => ({ key: column.key, label: column.label }))}
+          columns={relevantPageColumns.map((column) => ({ key: column.key, label: column.label }))}
           visibleKeys={visiblePageColumns}
-          onSelectAll={() => setAllColumns(setVisiblePageColumns, pageColumnsKey, pageColumns.map((column) => column.key))}
+          onSelectAll={() => setAllColumns(setVisiblePageColumns, pageColumnsKey, relevantPageColumns.map((column) => column.key))}
           onDeselectAll={() => clearAllColumns(setVisiblePageColumns, pageColumnsKey)}
           onToggle={(key) =>
             toggleColumn(
@@ -518,9 +550,9 @@ export default function App() {
       ) : (
         <ColumnPicker
           title="Visible Columns"
-          columns={eventColumns.map((column) => ({ key: column.key, label: column.label }))}
+          columns={relevantEventColumns.map((column) => ({ key: column.key, label: column.label }))}
           visibleKeys={visibleEventColumns}
-          onSelectAll={() => setAllColumns(setVisibleEventColumns, eventColumnsKey, eventColumns.map((column) => column.key))}
+          onSelectAll={() => setAllColumns(setVisibleEventColumns, eventColumnsKey, relevantEventColumns.map((column) => column.key))}
           onDeselectAll={() => clearAllColumns(setVisibleEventColumns, eventColumnsKey)}
           onToggle={(key) =>
             toggleColumn(
@@ -532,6 +564,16 @@ export default function App() {
           }
         />
       )}
+
+      {tab === "pages" && pagesData.ignored && pagesData.ignored.rowCount > 0 ? (
+        <section className="ignored-summary">
+          <strong>{pagesData.ignored.rowCount.toLocaleString()}</strong> rows hidden (&le; 5 users)
+          {" — "}
+          {pagesData.ignored.eventCount.toLocaleString()} events,{" "}
+          {pagesData.ignored.sessions.toLocaleString()} sessions,{" "}
+          {pagesData.ignored.totalUsers.toLocaleString()} users
+        </section>
+      ) : null}
 
       {tab === "pages" ? (
         <DataTable<PageRow>
@@ -547,6 +589,16 @@ export default function App() {
           loading={isLoadingPages}
         />
       ) : (
+        <>
+        {eventsData.ignored && eventsData.ignored.rowCount > 0 ? (
+          <section className="ignored-summary">
+            <strong>{eventsData.ignored.rowCount.toLocaleString()}</strong> rows hidden (&le; 5 users)
+            {" — "}
+            {eventsData.ignored.eventCount.toLocaleString()} events,{" "}
+            {eventsData.ignored.sessions.toLocaleString()} sessions,{" "}
+            {eventsData.ignored.totalUsers.toLocaleString()} users
+          </section>
+        ) : null}
         <DataTable<EventRow>
           columns={visibleEventColumnDefs}
           rows={eventsData.rows}
@@ -559,7 +611,18 @@ export default function App() {
           onPageChange={setEventsPage}
           loading={isLoadingEvents}
         />
+        </>
       )}
     </main>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/ga4-stream" element={<GA4StreamView />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }

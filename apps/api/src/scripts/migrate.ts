@@ -9,14 +9,18 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "../../../../");
 
 async function main() {
-  const migrationPath = path.join(repoRoot, "migrations", "010_ga4_dashboard.sql");
-  const sql = await fs.readFile(migrationPath, "utf8");
+  const migrationsDir = path.join(repoRoot, "migrations");
+  const files = (await fs.readdir(migrationsDir))
+    .filter((f) => f.startsWith("01") && f.endsWith(".sql"))
+    .sort();
 
   await withClient(async (client) => {
-    await client.query(sql);
+    for (const file of files) {
+      const sql = await fs.readFile(path.join(migrationsDir, file), "utf8");
+      await client.query(sql);
+      console.log(`Applied: ${file}`);
+    }
   });
-
-  console.log(`Applied migration: ${migrationPath}`);
 }
 
 main().catch((error) => {

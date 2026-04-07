@@ -1,4 +1,0 @@
-import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-export function ColumnPicker({ title, columns, visibleKeys, onToggle, onSelectAll, onDeselectAll }) {
-    return (_jsxs("section", { className: "panel compact-panel", children: [_jsxs("div", { className: "panel-heading", children: [_jsx("h2", { children: title }), _jsxs("div", { className: "actions-inline", children: [_jsx("button", { className: "ghost small", onClick: onSelectAll, children: "Select all" }), _jsx("button", { className: "ghost small", onClick: onDeselectAll, children: "Deselect all" })] })] }), _jsx("div", { className: "toggle-grid", children: columns.map((column) => (_jsxs("label", { className: "toggle-chip", children: [_jsx("input", { type: "checkbox", checked: visibleKeys.includes(column.key), onChange: () => onToggle(column.key) }), _jsx("span", { children: column.label })] }, column.key))) })] }));
-}

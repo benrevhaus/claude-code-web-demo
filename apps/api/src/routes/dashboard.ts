@@ -1,7 +1,7 @@
 import { Router } from "express";
 
 import { buildWhereClause, parsePagination, type QueryFilters, type SortDirection } from "../lib/filters.js";
-import { runHistoricalBackfill } from "../lib/ga4.js";
+import { runHistoricalBackfill, runIncrementalSync } from "../lib/ga4.js";
 import { pool } from "../lib/db.js";
 import { config } from "../config.js";
 
@@ -19,6 +19,7 @@ const eventSortColumns = new Set([
   "event_count",
   "sessions",
   "total_users",
+  "page_users",
 ]);
 const variantSortColumns = new Set([
   "date_pst",
@@ -48,14 +49,15 @@ const EVENT_GROUPINGS: Record<string, string[]> = {
     "raw_event_name",
     "event_class",
     "derived_page_path",
+    "event_param_value",
     "device_category",
     "source_medium",
     "is_conversion_event",
   ],
-  page: ["date_pst", "page_path", "normalized_event_name", "event_class", "is_conversion_event"],
-  device: ["date_pst", "page_path", "normalized_event_name", "event_class", "device_category", "is_conversion_event"],
-  source_medium: ["date_pst", "page_path", "normalized_event_name", "event_class", "source_medium", "is_conversion_event"],
-  event: ["date_pst", "normalized_event_name", "event_class", "is_conversion_event"],
+  page: ["date_pst", "page_path", "normalized_event_name", "event_class", "event_param_value", "is_conversion_event"],
+  device: ["date_pst", "page_path", "normalized_event_name", "event_class", "event_param_value", "device_category", "is_conversion_event"],
+  source_medium: ["date_pst", "page_path", "normalized_event_name", "event_class", "event_param_value", "source_medium", "is_conversion_event"],
+  event: ["date_pst", "normalized_event_name", "event_class", "event_param_value", "is_conversion_event"],
 };
 
 function buildGroupedSelect(groupingColumns: string[], metricTableAlias?: string) {
@@ -75,6 +77,7 @@ function buildGroupedSelect(groupingColumns: string[], metricTableAlias?: string
     ["raw_event_name", "''"],
     ["event_class", "'valid_event'"],
     ["derived_page_path", "''"],
+    ["event_param_value", "''"],
     ["is_conversion_event", "false"],
   ] as const;
 
@@ -127,6 +130,16 @@ router.post("/sync/backfill", async (req, res, next) => {
   }
 });
 
+router.post("/sync/incremental", async (req, res, next) => {
+  try {
+    const days = Number.parseInt(String(req.body?.days ?? 3), 10);
+    const result = await runIncrementalSync(days);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get("/summary", async (req, res, next) => {
   try {
     const filters = parseFilters(req.query as Record<string, string | undefined>);
@@ -162,7 +175,14 @@ router.get("/summary", async (req, res, next) => {
       ),
       pool.query(
         `
-        SELECT id, status, started_at, finished_at, pages_rows, events_rows
+        SELECT id, sync_type, status, started_at, finished_at,
+               days_back,
+               COALESCE(pages_rows, 0) AS pages_rows,
+               COALESCE(events_rows, 0) AS events_rows,
+               COALESCE(pages_new, 0) AS pages_new,
+               COALESCE(pages_updated, 0) AS pages_changed,
+               COALESCE(events_new, 0) AS events_new,
+               COALESCE(events_updated, 0) AS events_changed
         FROM analytics.ga4_sync_runs
         ORDER BY id DESC
         LIMIT 1
@@ -200,29 +220,55 @@ router.get("/pages", async (req, res, next) => {
       includeSearchOnEventName: false,
     });
 
-    const countResult = await pool.query(
-      `SELECT COUNT(*) FROM (SELECT 1 FROM analytics.ga4_page_daily ${where.text} GROUP BY ${groupingColumns.join(", ")}) grouped`,
-      where.params,
-    );
+    const minUsers = 5;
 
-    const rowsResult = await pool.query(
-      `
-      SELECT
-        ${buildGroupedSelect(groupingColumns)}
-        ,
-        SUM(views) AS views,
-        SUM(sessions) AS sessions,
-        SUM(total_users) AS total_users,
-        SUM(event_count) AS event_count
-      FROM analytics.ga4_page_daily
-      ${where.text}
-      GROUP BY ${groupingColumns.join(", ")}
-      ORDER BY ${sortBy} ${sortDirection}
-      LIMIT $${where.params.length + 1}
-      OFFSET $${where.params.length + 2}
-      `,
-      [...where.params, pagination.pageSize, pagination.offset],
-    );
+    const [countResult, rowsResult, ignoredResult] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*) FROM (SELECT 1 FROM analytics.ga4_page_daily ${where.text} GROUP BY ${groupingColumns.join(", ")} HAVING SUM(total_users) > ${minUsers}) grouped`,
+        where.params,
+      ),
+      pool.query(
+        `
+        SELECT
+          ${buildGroupedSelect(groupingColumns)}
+          ,
+          SUM(views) AS views,
+          SUM(sessions) AS sessions,
+          SUM(total_users) AS total_users,
+          SUM(event_count) AS event_count
+        FROM analytics.ga4_page_daily
+        ${where.text}
+        GROUP BY ${groupingColumns.join(", ")}
+        HAVING SUM(total_users) > ${minUsers}
+        ORDER BY ${sortBy} ${sortDirection}
+        LIMIT $${where.params.length + 1}
+        OFFSET $${where.params.length + 2}
+        `,
+        [...where.params, pagination.pageSize, pagination.offset],
+      ),
+      pool.query(
+        `
+        SELECT
+          COUNT(*) AS row_count,
+          COALESCE(SUM(event_count), 0) AS event_count,
+          COALESCE(SUM(sessions), 0) AS sessions,
+          COALESCE(SUM(total_users), 0) AS total_users
+        FROM (
+          SELECT
+            SUM(event_count) AS event_count,
+            SUM(sessions) AS sessions,
+            SUM(total_users) AS total_users
+          FROM analytics.ga4_page_daily
+          ${where.text}
+          GROUP BY ${groupingColumns.join(", ")}
+          HAVING SUM(total_users) <= ${minUsers}
+        ) ignored
+        `,
+        where.params,
+      ),
+    ]);
+
+    const ignored = ignoredResult.rows[0];
 
     res.json({
       page: pagination.page,
@@ -230,6 +276,12 @@ router.get("/pages", async (req, res, next) => {
       total: Number(countResult.rows[0].count),
       groupBy,
       rows: rowsResult.rows,
+      ignored: {
+        rowCount: Number(ignored.row_count),
+        eventCount: Number(ignored.event_count),
+        sessions: Number(ignored.sessions),
+        totalUsers: Number(ignored.total_users),
+      },
     });
   } catch (error) {
     next(error);
@@ -247,28 +299,80 @@ router.get("/events", async (req, res, next) => {
     const groupingColumns = EVENT_GROUPINGS[groupBy];
     const where = buildWhereClause(filters);
 
-    const countResult = await pool.query(
-      `SELECT COUNT(*) FROM (SELECT 1 FROM analytics.ga4_event_daily ${where.text} GROUP BY ${groupingColumns.join(", ")}) grouped`,
-      where.params,
-    );
+    const minUsers = 5;
 
-    const rowsResult = await pool.query(
-      `
-      SELECT
-        ${buildGroupedSelect(groupingColumns)}
-        ,
-        SUM(event_count) AS event_count,
-        SUM(sessions) AS sessions,
-        SUM(total_users) AS total_users
-      FROM analytics.ga4_event_daily
-      ${where.text}
-      GROUP BY ${groupingColumns.join(", ")}
-      ORDER BY ${sortBy} ${sortDirection}
-      LIMIT $${where.params.length + 1}
-      OFFSET $${where.params.length + 2}
-      `,
-      [...where.params, pagination.pageSize, pagination.offset],
-    );
+    const [countResult, rowsResult, ignoredResult] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*) FROM (SELECT 1 FROM analytics.ga4_event_daily ${where.text} GROUP BY ${groupingColumns.join(", ")} HAVING SUM(total_users) > ${minUsers}) grouped`,
+        where.params,
+      ),
+      pool.query(
+        (() => {
+          const hasPagePath = groupingColumns.includes("page_path");
+          // Build page WHERE reusing the same $N params as the event WHERE
+          const pageClauses: string[] = [];
+          let paramIdx = 0;
+          if (filters.startDate) { paramIdx++; pageClauses.push(`p.date_pst >= $${paramIdx}`); }
+          if (filters.endDate) { paramIdx++; pageClauses.push(`p.date_pst <= $${paramIdx}`); }
+          if (filters.pagePath) { paramIdx++; pageClauses.push(`p.page_path = $${paramIdx}`); }
+          const pageWhereText = pageClauses.length ? `WHERE ${pageClauses.join(" AND ")}` : "";
+          const pageGroupCols = hasPagePath ? "p.date_pst, p.page_path" : "p.date_pst";
+          const joinCond = hasPagePath
+            ? "ev.date_pst = pg.date_pst AND ev.page_path = pg.page_path"
+            : "ev.date_pst = pg.date_pst";
+
+          return `
+          WITH ev AS (
+            SELECT
+              ${buildGroupedSelect(groupingColumns)}
+              ,
+              SUM(event_count) AS event_count,
+              SUM(sessions) AS sessions,
+              SUM(total_users) AS total_users
+            FROM analytics.ga4_event_daily
+            ${where.text}
+            GROUP BY ${groupingColumns.join(", ")}
+            HAVING SUM(total_users) > ${minUsers}
+          ),
+          pg AS (
+            SELECT ${pageGroupCols}, SUM(p.total_users) AS page_users
+            FROM analytics.ga4_page_daily p
+            ${pageWhereText}
+            GROUP BY ${pageGroupCols}
+          )
+          SELECT ev.*, COALESCE(pg.page_users, 0) AS page_users
+          FROM ev
+          LEFT JOIN pg ON ${joinCond}
+          ORDER BY ${sortBy} ${sortDirection}
+          LIMIT $${where.params.length + 1}
+          OFFSET $${where.params.length + 2}
+          `;
+        })(),
+        [...where.params, pagination.pageSize, pagination.offset],
+      ),
+      pool.query(
+        `
+        SELECT
+          COUNT(*) AS row_count,
+          COALESCE(SUM(event_count), 0) AS event_count,
+          COALESCE(SUM(sessions), 0) AS sessions,
+          COALESCE(SUM(total_users), 0) AS total_users
+        FROM (
+          SELECT
+            SUM(event_count) AS event_count,
+            SUM(sessions) AS sessions,
+            SUM(total_users) AS total_users
+          FROM analytics.ga4_event_daily
+          ${where.text}
+          GROUP BY ${groupingColumns.join(", ")}
+          HAVING SUM(total_users) <= ${minUsers}
+        ) ignored
+        `,
+        where.params,
+      ),
+    ]);
+
+    const ignored = ignoredResult.rows[0];
 
     res.json({
       page: pagination.page,
@@ -276,6 +380,12 @@ router.get("/events", async (req, res, next) => {
       total: Number(countResult.rows[0].count),
       groupBy,
       rows: rowsResult.rows,
+      ignored: {
+        rowCount: Number(ignored.row_count),
+        eventCount: Number(ignored.event_count),
+        sessions: Number(ignored.sessions),
+        totalUsers: Number(ignored.total_users),
+      },
     });
   } catch (error) {
     next(error);

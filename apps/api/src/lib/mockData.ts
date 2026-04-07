@@ -18,6 +18,7 @@ type MockEventRow = {
   normalized_event_name: string;
   event_class: string;
   derived_page_path: string;
+  event_param_value: string;
   device_category: string;
   source_medium: string;
   landing_page_path: string;
@@ -49,6 +50,7 @@ const events = [
   "carousel_slide",
   "carousel_thumbnail_click",
   "scroll_depth",
+  "time_on_site",
   "click",
   "show_more",
   "show_less",
@@ -103,7 +105,6 @@ export function generateMockDataset(days: number): { pageRows: MockPageRow[]; ev
 
           for (const event_name of events) {
             const eventSeed = `${seed}|${event_name}`;
-            const eventClass = "valid_event";
             const normalizedEventName = event_name.toLowerCase().replace(/\s+/g, "_");
             const eventMultiplier =
               normalizedEventName === "page_view"
@@ -117,21 +118,70 @@ export function generateMockDataset(days: number): { pageRows: MockPageRow[]; ev
                       : normalizedEventName === "purchase"
                         ? 0.035
                         : 0.12;
-            eventRows.push({
-              date_pst,
-              page_path,
-              raw_event_name: event_name,
-              normalized_event_name: normalizedEventName,
-              event_class: eventClass,
-              derived_page_path: "",
-              device_category: device,
-              source_medium,
-              landing_page_path: page_path,
-              is_conversion_event: ["purchase", "begin_checkout"].includes(normalizedEventName),
-              event_count: Math.max(1, Math.floor(views * eventMultiplier) + numberFromSeed(eventSeed, 0, 8)),
-              sessions,
-              total_users,
-            });
+
+            // Parameterized events get split into separate rows per param value
+            if (normalizedEventName === "scroll_depth") {
+              const thresholds = ["25", "50", "75", "90"];
+              const baseCount = Math.max(1, Math.floor(views * eventMultiplier) + numberFromSeed(eventSeed, 0, 8));
+              for (const threshold of thresholds) {
+                const decay = threshold === "25" ? 1 : threshold === "50" ? 0.8 : threshold === "75" ? 0.55 : 0.3;
+                eventRows.push({
+                  date_pst,
+                  page_path,
+                  raw_event_name: event_name,
+                  normalized_event_name: `scroll_depth_${threshold}`,
+                  event_class: "valid_event",
+                  derived_page_path: "",
+                  event_param_value: threshold,
+                  device_category: device,
+                  source_medium,
+                  landing_page_path: page_path,
+                  is_conversion_event: false,
+                  event_count: Math.max(1, Math.floor(baseCount * decay)),
+                  sessions: Math.max(1, Math.floor(sessions * decay)),
+                  total_users: Math.max(1, Math.floor(total_users * decay)),
+                });
+              }
+            } else if (normalizedEventName === "time_on_site") {
+              const buckets = ["10", "30", "60", "120", "300"];
+              const baseCount = Math.max(1, Math.floor(views * eventMultiplier) + numberFromSeed(eventSeed, 0, 8));
+              for (const seconds of buckets) {
+                const decay = seconds === "10" ? 1 : seconds === "30" ? 0.7 : seconds === "60" ? 0.45 : seconds === "120" ? 0.2 : 0.08;
+                eventRows.push({
+                  date_pst,
+                  page_path,
+                  raw_event_name: event_name,
+                  normalized_event_name: `time_on_site_${seconds}`,
+                  event_class: "valid_event",
+                  derived_page_path: "",
+                  event_param_value: seconds,
+                  device_category: device,
+                  source_medium,
+                  landing_page_path: page_path,
+                  is_conversion_event: false,
+                  event_count: Math.max(1, Math.floor(baseCount * decay)),
+                  sessions: Math.max(1, Math.floor(sessions * decay)),
+                  total_users: Math.max(1, Math.floor(total_users * decay)),
+                });
+              }
+            } else {
+              eventRows.push({
+                date_pst,
+                page_path,
+                raw_event_name: event_name,
+                normalized_event_name: normalizedEventName,
+                event_class: "valid_event",
+                derived_page_path: "",
+                event_param_value: "",
+                device_category: device,
+                source_medium,
+                landing_page_path: page_path,
+                is_conversion_event: ["purchase", "begin_checkout"].includes(normalizedEventName),
+                event_count: Math.max(1, Math.floor(views * eventMultiplier) + numberFromSeed(eventSeed, 0, 8)),
+                sessions,
+                total_users,
+              });
+            }
           }
         }
       }
