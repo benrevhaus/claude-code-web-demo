@@ -1,19 +1,19 @@
 {
-  "id": 982341771,
+  "id": 820655302,
   "score": 5,
-  "title": "Great product",
-  "content": "This product exceeded my expectations. Would highly recommend.",
-  "sentiment": 0.95,
-  "votes_up": 12,
-  "votes_down": 1,
-  "product_id": 44556677,
-  "domain_key": "35677700",
-  "sku": "SKU-001",
-  "reviewer_type": "verified_buyer",
+  "votes_up": 0,
+  "votes_down": 0,
+  "content": "Love the diffuser. Really great in my car.",
+  "title": "Car oil diffuser",
+  "sentiment": 0.9768203,
+  "created_at": "2026-03-18T18:53:51.000Z",
+  "deleted": false,
   "verified_buyer": true,
-  "source_review_id": 982341770,
-  "name": "Jane D.",
-  "email": "jane@example.com",
+  "source_review_id": null,
+  "custom_fields": null,
+  "product_id": 18771190,
+  "is_incentivized": true,
+  "incentive_type": "yotpo_coupon",
   "images_data": [
     {
       "id": 1001,
@@ -21,8 +21,15 @@
       "original_url": "https://cdn.yotpo.com/original_1.jpg"
     }
   ],
-  "videos_data": [],
-  "deleted": false,
-  "created_at": "2025-11-15T10:30:00.000Z",
-  "updated_at": "2026-01-20T14:22:00.000Z"
+  "comment": null,
+  "user": {
+    "user_id": 1214403,
+    "social_image": null,
+    "user_type": "User",
+    "is_social_connected": 0,
+    "display_name": "Margie C."
+  },
+  "domain_key": "5961661633",
+  "product_yotpo_id": 18771190,
+  "product_name": "In-Car Essential Oil Diffuser"
 }

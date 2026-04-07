@@ -17,15 +17,24 @@ class YotpoReviewV1(BaseModel):
     sentiment: Optional[float] = None
     votes_up: int = 0
     votes_down: int = 0
+    # Product linkage
     product_yotpo_id: Optional[int] = None
     domain_key: Optional[str] = None
+    product_name: Optional[str] = None
+    # Review metadata
     reviewer_type: Optional[str] = None
     verified_buyer: Optional[bool] = None
+    is_incentivized: bool = False
+    incentive_type: Optional[str] = None
     source_review_id: Optional[int] = None
+    # Media
     images_data: list[dict[str, Any]] = []
-    videos_data: list[dict[str, Any]] = []
-    deleted: bool = False
+    # Author
     name: Optional[str] = None
     email: Optional[str] = None
+    # Status
+    deleted: bool = False
+    archived: bool = False
+    # Timestamps
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

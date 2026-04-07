@@ -32,39 +32,49 @@ class TestRawReviewParsing:
     def test_parse_review_with_all_fields(self):
         data = _load_fixture("reviews/review_1.json")
         raw = YotpoReviewRaw(**data)
-        assert raw.id == 982341771
+        assert raw.id == 820655302
         assert raw.score == 5
-        assert raw.domain_key == "35677700"
+        assert raw.domain_key == "5961661633"
         assert raw.verified_buyer is True
+        assert raw.is_incentivized is True
+        assert raw.incentive_type == "yotpo_coupon"
+        assert raw.product_yotpo_id == 18771190
+        assert raw.product_name == "In-Car Essential Oil Diffuser"
         assert len(raw.images_data) == 1
-        assert raw.videos_data == []
         assert raw.deleted is False
+        assert raw.name == "Margie C."  # Flattened from user.display_name
 
     def test_parse_review_missing_domain_key(self):
         data = _load_fixture("reviews/review_2.json")
         raw = YotpoReviewRaw(**data)
-        assert raw.id == 982341772
+        assert raw.id == 820157524
         assert raw.domain_key is None
-        assert raw.product_id is None
-        assert raw.verified_buyer is False
+        assert raw.product_yotpo_id is None
+        assert raw.verified_buyer is True
+        assert raw.images_data == []  # null normalized to empty list
 
     def test_extra_fields_accepted(self):
         data = _load_fixture("reviews/review_1.json")
         data["unknown_future_field"] = "surprise"
         raw = YotpoReviewRaw(**data)
-        assert raw.id == 982341771
+        assert raw.id == 820655302
 
-    def test_nested_product_normalization(self):
-        data = {"id": 100, "product": {"id": 999, "domain_key": "dk-42"}}
+    def test_user_object_flattening(self):
+        data = {"id": 100, "user": {"display_name": "Test User", "user_type": "verified_buyer"}}
         raw = YotpoReviewRaw(**data)
-        assert raw.product_id == 999
-        assert raw.domain_key == "dk-42"
+        assert raw.name == "Test User"
+        assert raw.reviewer_type == "verified_buyer"
+
+    def test_product_id_to_product_yotpo_id(self):
+        data = {"id": 100, "product_id": 999}
+        raw = YotpoReviewRaw(**data)
+        assert raw.product_yotpo_id == 999
 
     def test_page_wrapper(self):
         data = {"reviews": [_load_fixture("reviews/review_1.json")]}
         page = YotpoReviewsPageRaw(**data)
         assert len(page.reviews) == 1
-        assert page.reviews[0].id == 982341771
+        assert page.reviews[0].id == 820655302
 
     def test_page_wrapper_nested_response(self):
         data = {"response": {"reviews": [_load_fixture("reviews/review_1.json")]}}
@@ -110,16 +120,18 @@ class TestReviewTransform:
         canonical = transform_yotpo_review(raw, "test-store")
 
         assert isinstance(canonical, YotpoReviewV1)
-        assert canonical.id == 982341771
+        assert canonical.id == 820655302
         assert canonical.store_id == "test-store"
         assert canonical.score == 5
-        assert canonical.domain_key == "35677700"
-        assert canonical.product_yotpo_id == 44556677
-        assert canonical.votes_up == 12
-        assert canonical.votes_down == 1
+        assert canonical.domain_key == "5961661633"
+        assert canonical.product_yotpo_id == 18771190
+        assert canonical.product_name == "In-Car Essential Oil Diffuser"
+        assert canonical.verified_buyer is True
+        assert canonical.is_incentivized is True
+        assert canonical.incentive_type == "yotpo_coupon"
+        assert canonical.name == "Margie C."
         assert isinstance(canonical.created_at, datetime)
-        assert isinstance(canonical.updated_at, datetime)
-        assert canonical.images_data == [{"id": 1001, "thumb_url": "https://cdn.yotpo.com/thumb_1.jpg", "original_url": "https://cdn.yotpo.com/original_1.jpg"}]
+        assert len(canonical.images_data) == 1
 
     def test_transform_missing_fields(self):
         data = _load_fixture("reviews/review_2.json")
@@ -128,8 +140,9 @@ class TestReviewTransform:
 
         assert canonical.domain_key is None
         assert canonical.product_yotpo_id is None
-        assert canonical.votes_up == 2
         assert canonical.images_data == []
+        # updated_at falls back to created_at when not present
+        assert canonical.updated_at is not None
 
 
 class TestMetadataTransform:
@@ -152,10 +165,10 @@ class TestCursorState:
     def test_encode_decode_roundtrip(self):
         from src.shared.yotpo_client import encode_cursor_state, decode_cursor_state
 
-        encoded = encode_cursor_state("2026-01-01T00:00:00Z", "2", "2026-01-15T00:00:00Z")
+        encoded = encode_cursor_state("2026-01-01T00:00:00Z", "3:2", "2026-01-15T00:00:00Z")
         checkpoint, page_cursor, high_water = decode_cursor_state(encoded)
         assert checkpoint == "2026-01-01T00:00:00Z"
-        assert page_cursor == "2"
+        assert page_cursor == "3:2"
         assert high_water == "2026-01-15T00:00:00Z"
 
     def test_decode_none(self):
