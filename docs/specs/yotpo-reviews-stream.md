@@ -111,7 +111,7 @@ This remains the replay source of truth.
 
 ### Yotpo source-canonical tables
 
-Recommended phase 1 source tables:
+Recommended phase 1 source tables (all in the `yotpo` Postgres schema):
 
 - `yotpo.reviews_raw_current`
 - `yotpo.review_metadata_current`
@@ -142,12 +142,12 @@ Rows missing `domain_key` can still exist in raw/source-canonical layers, but th
 
 ## Publication Layers
 
-### 1. `yotpo_reviews_current`
+### 1. `reviews.yotpo_reviews_current`
 
 Joined Yotpo-specific current table built from:
 
-- `yotpo_reviews`
-- `yotpo_review_metadata`
+- `yotpo.reviews_raw_current`
+- `yotpo.review_metadata_current`
 
 This layer is used for:
 
@@ -155,24 +155,45 @@ This layer is used for:
 - reconciliation against Yotpo
 - debugging source-vs-generalization issues
 
-### 2. `generalized_reviews_current`
+### 2. `reviews.generalized_reviews_current`
 
 Official downstream contract.
 
 Built from:
 
-- `yotpo_reviews_current`
+- `reviews.yotpo_reviews_current`
 - generalized publication rules
 
-### 3. Restricted and audit outputs
+### 3. Restricted and audit outputs (all in the `reviews` Postgres schema)
 
-- `generalized_review_identity_links`
-- `generalized_review_publish_exceptions`
-- `generalized_review_publish_audit`
+- `reviews.generalized_review_identity_links`
+- `reviews.generalized_review_publish_exceptions`
+- `reviews.generalized_review_publish_audit`
 
 These are all produced from one shared publication pass.
 
+### Postgres schema layout
+
+All tables live in the same Aurora database. Logical separation uses Postgres schemas:
+
+- `yotpo.*` — source-canonical tables (Yotpo-shaped)
+- `reviews.*` — generalized publication tables, identity companion, exceptions, and audit
+
+Access to `reviews.generalized_review_identity_links` is restricted via the platform-wide `data_operator` Postgres role, granted only to connections that need private linkage (e.g., Customer 360). The broad `data_reader` role cannot access the restricted identity table. The same role pair (`data_reader` / `data_operator`) applies uniformly across all schemas.
+
 ## Snapshot And Publication Model
+
+### Publication orchestration: last-writer-wins
+
+No new Lambda, Step Function, or schedule is introduced for publication.
+
+Each source stream_runner checks after its own ingest whether the other required stream's source data is fresh enough. If both streams are current, the finishing stream_runner runs the publication pass inline.
+
+This means:
+
+- no new orchestration infrastructure
+- publication happens naturally as part of the last stream to complete
+- if one stream fails repeatedly, publication stalls — caught by existing freshness alarm patterns
 
 ### Shared publication cycle
 

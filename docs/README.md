@@ -6,11 +6,13 @@ These documents capture **intent**, not just implementation. Every decision reco
 
 ## How to use these docs
 
-- **Before building a new stream:** Read ADR-001 (Architecture Overview), ADR-006 (Config Over Code), and `specs/stream-spec.md`.
-- **Before adding infrastructure:** Read ADR-009 (Terraform Governance) and ADR-004 (Storage Strategy).
-- **Before modifying the Step Function:** Read ADR-007 (Orchestration) and `specs/step-function-design.md`.
-- **Before onboarding a new engineer:** Have them read docs in this order: README → ADR-001 → `specs/` → `guides/operability.md`.
-- **Before asking AI to generate a new stream:** Point it at ADR-012 (AI Leverage Model) and `specs/stream-spec.md`.
+- **Before building a new stream:** Read ADR-021 (Single-Lambda MVP), ADR-006 (Config Over Code), and `specs/stream-spec.md`.
+- **Before adding infrastructure:** Read ADR-023 (Single Prod Environment) and ADR-009 (Terraform Governance).
+- **Before adding a review source:** Read ADR-033 (Source-Pure Reviews), ADR-035 (PII Boundaries), and `specs/review-stream-implementation-guide.md`.
+- **Before onboarding a new engineer:** Have them read: `CLAUDE.md` → this README → ADR-021 → `specs/` → `guides/operability.md`.
+- **Before asking AI to generate a new stream:** Point it at ADR-012 (AI Leverage Model), ADR-036 (Decision Replication), and `specs/stream-spec.md`.
+
+> **Architecture note:** The production system uses the single-Lambda MVP (ADR-021/022). A dormant 4-Lambda Step Function architecture exists in the codebase for potential scale-up. Specs marked **(dormant)** below describe that architecture.
 
 ## Document Index
 
@@ -43,16 +45,19 @@ Numbered, immutable once accepted. If a decision is superseded, a new ADR replac
 | [ADR-021](adr/021-simplify-to-single-lambda-mvp.md) | Simplify to Single-Lambda MVP, Preserve Battle-Hardened Design for Scale-Up | Accepted |
 | [ADR-022](adr/022-mvp-implementation-and-scale-up-path.md) | MVP Implementation Plan and Scale-Up Path | Accepted |
 | [ADR-023](adr/023-single-prod-environment.md) | Single Prod Environment | Accepted |
-| [ADR-024](adr/024-stream-status-lifecycle.md) | Stream Status Lifecycle — draft / ready / live | Accepted |
-| [ADR-025](adr/025-clickhouse-fargate-alb-s3-evaluation.md) | Evaluate ClickHouse + Fargate + ALB + S3 as a Unified Data Streams Platform | Accepted |
-| [ADR-026](adr/026-ga4-gtm-immediate-stream.md) | Introduce GA4/GTM Immediately as a Webhook-First Event Stream | Accepted |
+| [ADR-024](adr/024-stream-status-lifecycle.md) | Stream Status Lifecycle — draft / ready / live (informational, not enforced) | Accepted |
+| ADR-025 | *(Skipped — absorbed into ADR-027/030/031 during GA4 dashboard track)* | — |
+| ADR-026 | *(Skipped — GA4 stream introduced directly via webhook consumer + schema registry)* | — |
 | [ADR-027](adr/027-ga4-historical-dashboard-mvp.md) | Build the Initial Data Streams Explorer GA4 View as an Aggregated Local App | Accepted |
 | [ADR-028](adr/028-ga4-dimension-coverage-and-variant-grain.md) | GA4 Dimension Coverage and Variant-Aware Aggregate Grain | Accepted |
 | [ADR-029](adr/029-ga4-event-name-normalization.md) | Normalize GA4 Event Names and Quarantine Instrumentation Noise | Accepted |
-| [ADR-030](adr/030-split-dashboard-from-data-streams.md) | Split the GA4 Dashboard Product Out of Data Streams | Accepted |
+| [ADR-030](adr/030-split-dashboard-from-data-streams.md) | Split the GA4 Dashboard Product Out of Data Streams | Superseded by ADR-031 |
 | [ADR-031](adr/031-internal-dashboard-suite.md) | Keep Data Streams Explorer in Data Streams as a Read-Only Internal Suite Surface | Accepted |
 | [ADR-032](adr/032-parameterized-event-splitting.md) | Split Parameterized Events by Their Primary GA4 Dimension | Accepted |
 | [ADR-033](adr/033-source-pure-review-streams-and-generalized-publication.md) | Keep Review Source Streams Pure, Publish a Generalized Review Layer | Accepted |
+| [ADR-034](adr/034-yotpo-reviews-infrastructure-decisions.md) | Yotpo Reviews Infrastructure and Orchestration Decisions | Accepted |
+| [ADR-035](adr/035-review-stream-pii-boundary-enforcement.md) | PII Boundary Enforcement in the Review Stream Architecture | Accepted |
+| [ADR-036](adr/036-decision-replication-and-adr-driven-autonomy.md) | Decision Replication and ADR-Driven Autonomy | Accepted |
 
 ### Specifications
 
@@ -60,10 +65,10 @@ Numbered, immutable once accepted. If a decision is superseded, a new ADR replac
 |------|-------------|
 | [Stream Spec](specs/stream-spec.md) | Standard stream definition schema (the YAML contract) |
 | [Analytics Contract](specs/analytics-contract.md) | Read contract for internal dashboard consumers over analytical datasets |
-| [Runtime Contracts](specs/runtime-contracts.md) | Input/output contracts for every Lambda role |
-| [Step Function Design](specs/step-function-design.md) | State machine definitions for polling and replay |
-| [Data Model](specs/data-model.md) | DynamoDB entities, S3 key patterns, Postgres schema |
-| [Failure Modes](specs/failure-modes.md) | Known failure modes with symptoms, causes, and recovery |
+| [Runtime Contracts](specs/runtime-contracts.md) | Input/output contracts for every Lambda role **(dormant — describes 4-Lambda architecture)** |
+| [Step Function Design](specs/step-function-design.md) | State machine definitions for polling and replay **(dormant — MVP uses stream_runner)** |
+| [Data Model](specs/data-model.md) | S3 key patterns, Postgres schema |
+| [Failure Modes](specs/failure-modes.md) | Known failure modes with symptoms, causes, and recovery **(dormant — describes Step Function failures)** |
 | [Generalized Reviews Contract](specs/generalized-reviews-contract.md) | Phase 1 provider-agnostic published review contract, restricted identity boundary, and audit model |
 | [Review Stream Implementation Guide](specs/review-stream-implementation-guide.md) | Implementation-grade build order, table responsibilities, publication logic, and reusable rules for future review streams |
 | [Yotpo Reviews Phase 1](specs/yotpo-reviews-stream.md) | Yotpo-specific source stream, publication, baseline, and generalized review implementation plan |

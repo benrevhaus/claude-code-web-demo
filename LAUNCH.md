@@ -2,7 +2,7 @@
 
 **Architecture:** ADR-021 / ADR-022 / ADR-023
 **Environment:** Single prod only (no dev — see ADR-023)
-**Streams:** Shopify (orders, customers, products, inventory, refunds, transactions) + Gorgias tickets
+**Streams:** Shopify (orders, customers, products, inventory, refunds, transactions) + Gorgias tickets + Yotpo (reviews, review-metadata) + GA4 events (webhook)
 
 ---
 
@@ -12,16 +12,16 @@
 |----------|-------|-------|
 | S3 bucket | 1 | `data-streams-raw-prod`, versioned, Glacier at 90d |
 | Aurora Serverless v2 | 1 cluster + 1 instance | 0.5–8 ACU, public endpoint, SSL |
-| Lambda (polling) | 5 | orders (5m), customers (15m), products (30m), inventory (15m), gorgias-tickets (15m) |
-| Lambda (webhooks) | 1 | webhook-consumer, SQS-triggered, concurrency=5 |
-| EventBridge rules | 5 | One per polling Lambda |
+| Lambda (polling) | 7 | orders (5m), customers (15m), products (30m), inventory (15m), gorgias-tickets (15m), yotpo-reviews (15m), yotpo-review-metadata (60m) |
+| Lambda (webhooks) | 1 | webhook-consumer, SQS-triggered, concurrency=5 (Shopify webhooks + GA4 events) |
+| EventBridge rules | 7 | One per polling Lambda |
 | SQS queues | 2 | Webhook queue + DLQ |
 | API Gateway | 1 | HTTP API for webhook ingestion |
-| SSM parameters | 7 | Secrets (placeholders, set manually) |
-| CloudWatch alarms | 9 | Error alarms per Lambda + DLQ depth |
-| IAM roles | 6 | 5 polling + 1 webhook consumer |
+| SSM parameters | 9 | Secrets (placeholders, set manually) |
+| CloudWatch alarms | 11 | Error alarms per Lambda + DLQ depth |
+| IAM roles | 8 | 7 polling + 1 webhook consumer |
 | SNS topic | 1 | Alert notifications |
-| **Total** | **~65** | |
+| **Total** | **~77** | |
 
 ---
 
@@ -34,6 +34,7 @@
 - Shopify GraphQL Admin API access token (`shpat_...`)
 - Shopify webhook secret (from app settings)
 - Gorgias API credentials (email + API key)
+- Yotpo app key and secret key (from Yotpo merchant settings)
 - Brandhaus Postgres connection string (for dual-write, optional)
 
 ---
@@ -133,6 +134,19 @@ aws ssm put-parameter \
   --value "YOUR_GORGIAS_API_KEY" \
   --overwrite
 
+# Yotpo credentials
+aws ssm put-parameter \
+  --name /data-streams/$ENV/yotpo/app_key \
+  --type SecureString \
+  --value "YOUR_YOTPO_APP_KEY" \
+  --overwrite
+
+aws ssm put-parameter \
+  --name /data-streams/$ENV/yotpo/secret_key \
+  --type SecureString \
+  --value "YOUR_YOTPO_SECRET_KEY" \
+  --overwrite
+
 # Postgres connection string (from Aurora endpoint + your password)
 aws ssm put-parameter \
   --name /data-streams/$ENV/postgres/connection_string \
@@ -163,10 +177,17 @@ psql "$CONN" \
   -f migrations/005_shopify_products.sql \
   -f migrations/006_shopify_inventory.sql \
   -f migrations/007_shopify_refunds.sql \
-  -f migrations/008_shopify_transactions.sql
+  -f migrations/008_shopify_transactions.sql \
+  -f migrations/010_ga4_dashboard.sql \
+  -f migrations/011_ga4_variant_grain.sql \
+  -f migrations/012_ga4_event_normalization.sql \
+  -f migrations/013_event_param_value.sql \
+  -f migrations/014_sync_run_stats.sql \
+  -f migrations/015_yotpo_reviews.sql \
+  -f migrations/016_platform_access_control.sql
 ```
 
-This creates 10 tables under `shopify.*`, 2 under `gorgias.*`, and 1 under `control.*`.
+This creates tables under `shopify.*`, `gorgias.*`, `control.*`, `analytics.*`, `yotpo.*`, and `reviews.*`, plus `data_reader` and `data_operator` Postgres roles (migration 016). Migration 009 is intentionally skipped (see `009_SKIPPED.sql`).
 
 ---
 

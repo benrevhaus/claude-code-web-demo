@@ -87,6 +87,8 @@ type SortState = {
   sortDirection: "asc" | "desc";
 };
 
+const DATA_START_DATE = "2026-04-04";
+
 const today = new Date();
 const thirtyDaysAgo = new Date(today.getTime() - 29 * 24 * 60 * 60 * 1000);
 const defaultEventNames = [
@@ -119,8 +121,12 @@ function formatDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+function clampStart(date: string) {
+  return date < DATA_START_DATE ? DATA_START_DATE : date;
+}
+
 const defaultFilters: Filters = {
-  startDate: formatDate(thirtyDaysAgo),
+  startDate: clampStart(formatDate(thirtyDaysAgo)),
   endDate: formatDate(today),
   pagePath: "",
   eventNames: [...defaultEventNames],
@@ -138,23 +144,29 @@ const activeTabKey = "data-streams-explorer-active-tab";
 const pageColumnsKey = "data-streams-explorer-page-columns";
 const eventColumnsKey = "data-streams-explorer-event-columns";
 
-const pageColumns = [
-  { key: "date_pst", label: "Date", sortable: true },
+const fmtRate = (n: number) => (n * 100).toFixed(1) + "%";
+const fmtRatio = (n: number) => n.toFixed(2);
+const fmtDate = (v: unknown) => String(v).slice(0, 10);
+
+type ColDef<T> = { key: string; label: string; sortable?: boolean; render?: (row: T) => React.ReactNode; defaultHidden?: boolean };
+
+const pageColumns: readonly ColDef<PageRow>[] = [
+  { key: "date_pst", label: "Date", sortable: true, render: (row) => fmtDate(row.date_pst) },
   { key: "page_path", label: "Page", sortable: true },
   { key: "page_title", label: "Title" },
   { key: "device_category", label: "Device" },
   { key: "source_medium", label: "Source / Medium" },
-  { key: "views", label: "Views", sortable: true },
-  { key: "sessions", label: "Sessions", sortable: true },
   { key: "total_users", label: "Users", sortable: true },
-  { key: "event_count", label: "Events", sortable: true },
+  { key: "views_per_user", label: "Views/User", render: (row) => fmtRatio(Number(row.total_users) > 0 ? Number(row.views) / Number(row.total_users) : 0) },
+  { key: "ev_per_user", label: "Ev/User", render: (row) => fmtRatio(Number(row.total_users) > 0 ? Number(row.event_count) / Number(row.total_users) : 0) },
+  { key: "sess_per_user", label: "Sess/User", render: (row) => fmtRatio(Number(row.total_users) > 0 ? Number(row.sessions) / Number(row.total_users) : 0) },
+  { key: "views", label: "Views", sortable: true, defaultHidden: true },
+  { key: "sessions", label: "Sessions", sortable: true, defaultHidden: true },
+  { key: "event_count", label: "Events", sortable: true, defaultHidden: true },
 ] as const;
 
-const fmtRate = (n: number) => (n * 100).toFixed(1) + "%";
-const fmtRatio = (n: number) => n.toFixed(2);
-
-const eventColumns: readonly { key: string; label: string; sortable?: boolean; render?: (row: EventRow) => React.ReactNode }[] = [
-  { key: "date_pst", label: "Date", sortable: true },
+const eventColumns: readonly ColDef<EventRow>[] = [
+  { key: "date_pst", label: "Date", sortable: true, render: (row) => fmtDate(row.date_pst) },
   { key: "event_name", label: "Event", sortable: true },
   { key: "event_param_value", label: "Param Value" },
   { key: "raw_event_name", label: "Raw Event" },
@@ -163,13 +175,13 @@ const eventColumns: readonly { key: string; label: string; sortable?: boolean; r
   { key: "page_path", label: "Page", sortable: true },
   { key: "device_category", label: "Device" },
   { key: "source_medium", label: "Source / Medium" },
-  { key: "event_count", label: "Event Count", sortable: true },
-  { key: "sessions", label: "Sessions", sortable: true },
   { key: "total_users", label: "Users", sortable: true },
-  { key: "page_users", label: "Page Users", sortable: true },
+  { key: "user_rate", label: "User Rate", render: (row) => Number(row.page_users) > 0 ? fmtRate(Number(row.total_users) / Number(row.page_users)) : "—" },
   { key: "ev_per_user", label: "Ev/User", render: (row) => fmtRatio(Number(row.total_users) > 0 ? Number(row.event_count) / Number(row.total_users) : 0) },
   { key: "sess_per_user", label: "Sess/User", render: (row) => fmtRatio(Number(row.total_users) > 0 ? Number(row.sessions) / Number(row.total_users) : 0) },
-  { key: "user_rate", label: "User Rate", render: (row) => Number(row.page_users) > 0 ? fmtRate(Number(row.total_users) / Number(row.page_users)) : "—" },
+  { key: "event_count", label: "Event Count", sortable: true, defaultHidden: true },
+  { key: "sessions", label: "Sessions", sortable: true, defaultHidden: true },
+  { key: "page_users", label: "Page Users", sortable: true, defaultHidden: true },
 ] as const;
 
 function Home() {
@@ -205,8 +217,8 @@ function GA4StreamView() {
   const [tab, setTab] = useState<"pages" | "events">("pages");
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
-  const [visiblePageColumns, setVisiblePageColumns] = useState<string[]>(pageColumns.map((column) => column.key));
-  const [visibleEventColumns, setVisibleEventColumns] = useState<string[]>(eventColumns.map((column) => column.key));
+  const [visiblePageColumns, setVisiblePageColumns] = useState<string[]>(pageColumns.filter((c) => !c.defaultHidden).map((c) => c.key));
+  const [visibleEventColumns, setVisibleEventColumns] = useState<string[]>(eventColumns.filter((c) => !c.defaultHidden).map((c) => c.key));
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({
     pagePaths: [],
@@ -244,14 +256,14 @@ function GA4StreamView() {
     if (savedPageColumns) {
       const saved: string[] = JSON.parse(savedPageColumns);
       const allKeys = new Set<string>(pageColumns.map((c) => c.key));
-      const newKeys = pageColumns.filter((c) => !saved.includes(c.key as string)).map((c) => c.key as string);
+      const newKeys = pageColumns.filter((c) => !saved.includes(c.key as string) && !c.defaultHidden).map((c) => c.key as string);
       setVisiblePageColumns([...saved.filter((k) => allKeys.has(k)), ...newKeys]);
     }
     const savedEventColumns = localStorage.getItem(eventColumnsKey);
     if (savedEventColumns) {
       const saved: string[] = JSON.parse(savedEventColumns);
       const allKeys = new Set<string>(eventColumns.map((c) => c.key));
-      const newKeys = eventColumns.filter((c) => !saved.includes(c.key as string)).map((c) => c.key as string);
+      const newKeys = eventColumns.filter((c) => !saved.includes(c.key as string) && !c.defaultHidden).map((c) => c.key as string);
       setVisibleEventColumns([...saved.filter((k) => allKeys.has(k)), ...newKeys]);
     }
   }, []);
@@ -355,7 +367,7 @@ function GA4StreamView() {
     const start = new Date(end.getTime() - (days - 1) * 24 * 60 * 60 * 1000);
     setFilters((current) => ({
       ...current,
-      startDate: formatDate(start),
+      startDate: clampStart(formatDate(start)),
       endDate: formatDate(end),
     }));
     setPagesPage(1);
@@ -517,6 +529,7 @@ function GA4StreamView() {
             onReset={resetFilters}
               onSaveSearch={saveSearch}
               onQuickRange={setQuickRange}
+              minDate={DATA_START_DATE}
             />
         </div>
         <SavedSearches searches={savedSearches} onLoad={loadSearch} onDelete={deleteSearch} />

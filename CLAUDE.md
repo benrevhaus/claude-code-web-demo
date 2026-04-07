@@ -88,30 +88,21 @@ data-streams/
 - **Shared libs are the logic layer.** All reusable logic lives in `src/shared/`.
 - **Schemas are the contract layer.** Raw models are permissive (`extra="allow"`). Canonical models are strict. Transforms are pure functions.
 - **Stream YAML is the config layer.** Adding a new stream for an existing source = YAML + schema + migration. No new Lambda code.
-- **`src/shared/contracts.py` is the interface boundary.** Every Lambda's input/output is a Pydantic model defined here.
-- **Only `src/shared/dynamo_control.py` talks to DynamoDB.** Only `src/shared/pg_client.py` talks to Postgres. Only `src/shared/s3_writer.py` writes to S3.
+- **`src/shared/contracts.py` is the interface boundary.** Every Lambda's input/output is a Pydantic model defined here. (Used by dormant 4-Lambda architecture; stream_runner uses schema registry directly.)
+- **Only `src/shared/pg_client.py` talks to Postgres.** Only `src/shared/s3_writer.py` writes to S3. (`brandhaus_writer.py` is a separate dual-write concern for the legacy system, gated by `DUAL_WRITE_ENABLED` env var.)
 
 ---
 
 ## Data model
 
-### DynamoDB (`data-streams-control-{env}`, single table, on-demand)
+### Control plane — Postgres (`control` schema, migration 003)
 
-- **Run Record** — `PK: STREAM#{source}#{stream}#{store_id}`, `SK: RUN#{run_id}`
-  - Tracks each polling execution: status, cursor range, page/record counts, timing
-  - No TTL (permanent audit trail)
+> **Note:** The original V2 design used DynamoDB for the control plane. The MVP architecture (ADR-021/022) moved all control state to Postgres. The DynamoDB code (`src/shared/dynamo_control.py`) is dormant but preserved for potential Tier 3 scale-up.
 
-- **Cursor Checkpoint** — `PK: STREAM#{source}#{stream}#{store_id}`, `SK: CURSOR#current`
-  - Where last successful run stopped; next run starts here
-  - Fields: `cursor_value`, `updated_at`, `run_id`
-
-- **Idempotency Record** — `PK: IDEM#{source}#{stream}`, `SK: {sha256_hash}`
-  - Prevents duplicate processing; hash computed from `idempotency_key` fields in stream spec
-  - TTL: 30 days
-
-- **Freshness Status** — `PK: STREAM#{source}#{stream}#{store_id}`, `SK: FRESHNESS#current`
-  - `last_record_at`, `checked_at`, `lag_minutes`
-  - Updated by finalizer every run
+- **Stream Cursors** — `control.stream_cursors`
+  - PK: `(source, stream, store_id)`
+  - Tracks: `cursor_value`, `run_id`, `last_status`, `last_run_at`, `pages_total`, `records_total`
+  - One row per stream per store — upserted after each successful run
 
 ### S3 (`data-streams-raw-{env}`)
 
@@ -119,78 +110,82 @@ data-streams/
 - Webhooks: `{source}/{stream}/{store_id}/webhooks/{YYYY}/{MM}/{DD}/{webhook_id}.json.gz`
 - SSE-S3 encryption, versioning enabled, lifecycle: Glacier at 90d
 
-### Postgres (Aurora Serverless v2, via RDS Proxy)
+### Postgres (Aurora Serverless v2)
 
-- `shopify.orders` — current-state table with upsert-on-newer pattern
-- `shopify.orders_history` — append-only change log, `UNIQUE (order_id, store_id, changed_at)`
-- Every row carries: `raw_s3_key` (lineage), `schema_version`, `run_id`, `ingested_at`
+Source-canonical schemas per vendor, plus published and analytical schemas:
+
+- `shopify.*` — orders, customers, products, inventory_levels, refunds, transactions (+ history tables)
+- `gorgias.*` — tickets (+ history)
+- `yotpo.*` — reviews_raw_current, review_metadata_current, snapshot_sets, snapshot_runs (+ history tables)
+- `reviews.*` — yotpo_reviews_current, generalized_reviews_current, identity_links, publish_exceptions, publish_audit
+- `analytics.*` — ga4_page_daily, ga4_event_daily, ga4_page_variant_daily, ga4_sync_runs
+- `control.*` — stream_cursors
+
+Every source-canonical row carries: `raw_s3_key` (lineage), `schema_version`, `run_id`, `ingested_at`
+
+### Access control (migration 016)
+
+- `data_reader` — analysts, dashboards. Non-PII tables only.
+- `data_operator` — pipeline debugging, oncall. Inherits `data_reader` + PII tables.
+- `data_identity` — future: scoped for Customer 360 when built.
+- Admin — DDL, role management, superuser.
 
 ### SSM Parameters
 
-- `/data-streams/{env}/shopify/access_token` (GraphQL Admin API token — used by poller)
+- `/data-streams/{env}/shopify/access_token`
 - `/data-streams/{env}/shopify/webhook_secret`
+- `/data-streams/{env}/gorgias/email`
+- `/data-streams/{env}/gorgias/api_key`
+- `/data-streams/{env}/yotpo/app_key`
+- `/data-streams/{env}/yotpo/secret_key`
 - `/data-streams/{env}/postgres/connection_string`
+- `/data-streams/{env}/brandhaus/connection_string`
+- `/data-streams/{env}/ga4/ingest_secret`
 
 ---
 
-## Lambda runtime contracts (summary)
+## Lambda runtime contracts
 
-### shopify-poller
-- **In:** `run_id`, `stream_config`, `store_id`, `cursor`, `page_number`
-- **Out:** `s3_key`, `record_count`, `next_cursor`, `has_more`, rate limit info
-- **Does:** Fetch one API page, write raw to S3, update run record
-- **Does NOT:** Process data, write to Postgres, decide pagination
+### stream-runner (MVP — ADR-021/022, production)
+- **In:** `{source, stream, store_id}` from EventBridge
+- **Out:** `{run_id, status, pages, records_processed, records_failed, cursor, errors}`
+- **Does:** Full loop: fetch all pages → write raw to S3 → transform → upsert Postgres → save cursor. For Yotpo streams, also triggers publication pass (last-writer-wins, ADR-034).
+- **Does NOT:** Manage inter-Lambda state, use DynamoDB, use Step Functions
 
-### processor
-- **In:** `source`, `stream`, `s3_key`, `run_id`, `store_id`, `trigger`
-- **Out:** `records_processed`, `records_skipped`, `records_failed`, `errors`
-- **Does:** Read S3 → validate raw → transform to canonical → check idempotency → upsert Postgres → write idempotency key
-- **Does NOT:** Call vendor APIs, manage cursors
+### Dormant 4-Lambda architecture (preserved for Tier 3 scale-up)
+> The following handlers exist in the codebase but are NOT deployed. See ADR-021 for rationale, ADR-022 for scale-up path. The `infra/environments/dev/` and `infra/environments/prod/` Terraform directories wire this architecture but are not applied.
 
-### run-finalizer
-- **In:** `run_id`, `stream_config`, `store_id`, totals, `status`, `final_cursor`
-- **Out:** `freshness_lag_minutes`, `status`
-- **Does:** Close run record, update cursor, compute freshness, emit CloudWatch metrics
-- **Does NOT:** Process data, call APIs
+- `src/lambdas/initializer/handler.py` — generate run_id, create DynamoDB run record, read cursor
+- `src/lambdas/poller/handler.py` — fetch one API page, write raw to S3
+- `src/lambdas/processor/handler.py` — read S3 → validate → transform → upsert Postgres
+- `src/lambdas/finalizer/handler.py` — close run, update cursor, emit metrics
 
 ---
 
 ## Orchestration
 
-**Step Function (polling):**
-```
-Initialize → FetchPage → ProcessPage → CheckMore
-  ├─ has_more=true → ThrottleWait → FetchPage (loop)
-  └─ has_more=false → Finalize
-Error states: HandleFetchError, HandleProcessError → always reach Finalize
-Timeout: 30min incremental, 4hr backfill
-```
+**EventBridge** → triggers stream_runner Lambda directly on schedule (per-stream rates defined in Terraform).
 
-**EventBridge:** `rate(5 minutes)` → triggers Step Function
+> The dormant architecture uses Step Functions (Initialize → FetchPage → ProcessPage → CheckMore loop → Finalize). See `infra/modules/stream-poller/` for the preserved Step Function definition.
+
+---
+
+## Dashboard (Data Streams Explorer)
+
+The `apps/` directory contains a read-only internal analytics surface (ADR-031):
+- `apps/web/` — React/Vite frontend (stream selection home + GA4 stream view)
+- `apps/api/` — Express/Node.js API server (GA4 query execution against `analytics.*` tables)
+
+The dashboard reads from `analytics.*` Postgres tables only. It does not read source-canonical or ingestion tables. The analytical contract is defined in `docs/specs/analytics-contract.md`.
 
 ---
 
 ## Key design invariants
 1. **Raw data is immutable.** Never modify or delete S3 raw payloads.
-2. **Processor is stateless and deterministic.** Same S3 input → same Postgres output.
-3. **Idempotency is two-layer.** DynamoDB (fast check, 30d TTL) + Postgres UNIQUE constraint (safety net).
-4. **Upsert checks `updated_at`.** Never overwrite newer data with older data.
-5. **Config over code.** New stream for existing source = YAML + schema + migration, not new Lambda code.
-
----
-
-## Acceptance criteria (V1)
-The MVP is "done" when:
-- Shopify Orders stream is flowing end-to-end in dev
-- Raw payloads land in S3 at correct key paths
-- Run records, cursors, and freshness tracked in DynamoDB
-- Orders upserted to Postgres `shopify.orders` with history in `shopify.orders_history`
-- Idempotency prevents duplicate processing on retry/replay
-- CloudWatch dashboard shows freshness, throughput, and errors
-- Freshness alarm fires when SLA breached
-- Manual replay from S3 works correctly
-- `terraform plan` is clean for both dev and prod
-- All unit tests pass (transforms, config parsing, idempotency)
+2. **Upsert checks `updated_at`.** Never overwrite newer data with older data.
+3. **Config over code.** New stream for existing source = YAML + schema + migration, not new Lambda code.
+4. **PII boundaries are database-enforced.** Schema-level GRANT/REVOKE, not application-level filtering (ADR-035).
+5. **Source-canonical stays source-shaped.** Generalization happens at publication, not ingestion (ADR-033).
 
 ---
 
@@ -219,6 +214,16 @@ If this repository is lost or needs to be recreated:
 - 0.38.0 — Added the analytics contract spec, superseded ADR-030 with ADR-031, and re-framed the dashboard as a read-only internal suite surface inside `data-streams` bound by documented analytical contracts.
 - 0.39.0 — Renamed the in-repo analytical surface to Data Streams Explorer across app copy and core docs, positioning GA4 as the first stream view inside a broader internal suite surface.
 - 0.40.0 — Added a true Data Streams Explorer home view with stream selection, making GA4 a navigable stream module instead of the default root screen.
+- 0.56.1 — Added DATA_START_DATE (2026-04-04) as a hard floor for all date queries. Pre-cutoff data has missing critical events. Clamped in API parseFilters, frontend default filters, quick range presets, and date picker min attributes.
+- 0.56.0 — Second coherence pass: created missing GA4 schema files (raw model, canonical model, transform) that blocked all Lambda cold-starts via schema_registry import failure, added ga4-events.yaml stream config, fixed 71/71 tests to green. Updated docs/README.md with current ADR index (034-036), marked dormant specs, fixed ADR-025/026 broken links, updated "How to use" section. Updated LAUNCH.md with Yotpo streams, SSM params, and migrations 010-016.
+- 0.55.0 — Replaced raw metric columns with user-based ratios across both tabs. Pages shows Users, Views/User, Ev/User, Sess/User. Events shows Users, User Rate, Ev/User, Sess/User. Raw counts (views, sessions, event_count, page_users) default hidden but available in column picker. Date column trimmed to YYYY-MM-DD. Column ordering aligned between tabs for shared keys. Added `defaultHidden` support to column definitions.
+- 0.54.0 — Coherence fixes: rewrote CLAUDE.md data model to reflect Postgres control plane (was stale DynamoDB), updated Lambda contracts to document stream-runner MVP vs dormant 4-Lambda architecture, added dashboard section to CLAUDE.md (ADR-031), added migration 009 placeholder documenting the numbering gap, added DORMANT markers to initializer/poller/processor/finalizer handlers, documented StreamStatus as informational-only (not enforced by Terraform), updated key design invariants and SSM parameter list, removed stale DynamoDB/Step Function references from current-state documentation.
+- 0.53.0 — Added ADR-036: decision replication and ADR-driven autonomy. Documents why the decision-making layer is the platform's remaining single point of failure, decomposes judgment into three capabilities (timing, complexity calibration, sufficiency), and defines what the ADR corpus can and cannot transfer to future decision-makers.
+- 0.52.0 — Platform-wide access control: migration 016 introduces `data_reader` (analysts, no PII) and `data_operator` (pipeline/oncall, inherits data_reader + PII tables) replacing per-source `reviews_reader`/`reviews_restricted`. Shopify PII tables (orders, customers + histories) and all Gorgias tables restricted to `data_operator` only. Non-PII Shopify tables (products, inventory, refunds, transactions), analytics, control, and published reviews tables granted to `data_reader`. Yotpo source-canonical and identity companion granted to `data_operator`. Customer 360 will get a future scoped `data_identity` role when built — must not connect as `data_operator`. Migration 015 role section annotated as superseded. All spec and ADR references updated.
+- 0.51.0 — Added ADR-035: PII boundary enforcement in the review stream architecture. Documents schema-level access control model, JSONB PII tracing methodology, and the caught-during-review source-canonical grant leak. Fixed name/email column gaps in source-canonical DDL and upsert SQL, wired author_display_name through publication layers, and added raw_email to the restricted identity companion via source-canonical join.
+- 0.50.0 — Built Yotpo reviews application code: YotpoClient REST client with utoken auth and page-number pagination, raw models (review + metadata with extra="allow"), canonical models (review_v1 + review_metadata_v1), transforms, pg_client upsert/history methods, schema registry entries, stream YAMLs, handler routing + publication hook (last-writer-wins per ADR-034), review_publisher.py shared module (freshness check + full publication pass: yotpo_reviews_current → generalized_reviews_current + identity links + exceptions + audit), migration 015 (yotpo + reviews schemas, all tables, Postgres roles), and tests. Fixed Terraform EventBridge stream name mismatch (review_metadata → review-metadata).
+- 0.49.0 — Added Yotpo reviews Terraform infrastructure: two stream_runner Lambdas (yotpo-reviews at 15min, yotpo-review-metadata at 60min), EventBridge schedules, IAM roles, SSM credential placeholders, CloudWatch error alarms, yotpo_store_id variable, and outputs. Added ADR-034 documenting three infrastructure decisions: last-writer-wins publication orchestration, yotpo/reviews Postgres schema namespacing, and database-level role-based access control for the restricted identity companion.
+- 0.48.0 — Updated review stream specs with three resolved decisions: last-writer-wins publication orchestration (no new Lambda/Step Function), `yotpo.*` and `reviews.*` Postgres schema namespacing in the same Aurora database, and Postgres role-based access control (`reviews_restricted`) for the restricted identity companion table.
 - 0.47.0 — Added three computed engagement columns to the events table: Ev/User (event intensity per person), Sess/User (sessions before triggering), and User Rate % (reach — what % of page users trigger the event). API joins page-level user counts via CTE, adapting join dimensions to the active grouping. Also added Page Users as a visible/sortable column.
 - 0.46.1 — Events table now also filters out rows with <= 5 users and shows an ignored-rows banner above the table, matching the pages behavior.
 - 0.46.0 — Pages table now filters out rows with <= 5 users via HAVING clause. API returns `ignored` summary (row count, events, sessions, users) alongside results. Frontend shows an ignored-rows banner above the pages table for GA4 reconciliation. Also added COALESCE to sync run stat columns so null values from pre-migration rows return 0.

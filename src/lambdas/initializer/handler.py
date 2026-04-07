@@ -1,7 +1,11 @@
-"""Initializer Lambda handler.
+"""DORMANT — Initializer Lambda handler (4-Lambda architecture, ADR-021).
 
-Loads stream config, creates a run record, reads the current cursor, and returns
-the initial Step Function accumulator state for a polling execution.
+NOT DEPLOYED. The MVP uses stream_runner (single Lambda) instead.
+Preserved for potential Tier 3 scale-up (ADR-022).
+See docs/roadmap/not-building.md for dormant components.
+
+Original purpose: load stream config, create a run record, read the current
+cursor, and return the initial Step Function accumulator state.
 """
 
 from __future__ import annotations

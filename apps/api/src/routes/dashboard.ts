@@ -90,9 +90,14 @@ function buildGroupedSelect(groupingColumns: string[], metricTableAlias?: string
   return dimensions.join(",\n        ");
 }
 
+function clampStart(date: string | undefined): string | undefined {
+  if (!date) return date;
+  return date < config.DATA_START_DATE ? config.DATA_START_DATE : date;
+}
+
 function parseFilters(query: Record<string, string | undefined>): QueryFilters {
   return {
-    startDate: query.startDate,
+    startDate: clampStart(query.startDate),
     endDate: query.endDate,
     pagePath: query.pagePath,
     landingPagePath: query.landingPagePath,

@@ -25,6 +25,12 @@ class CursorType(str, Enum):
 
 
 class StreamStatus(str, Enum):
+    """Stream lifecycle status (ADR-024).
+
+    NOTE: This field is informational only. Terraform hard-codes stream names
+    and does not read this value. The status is a human signal for where a
+    stream is in its lifecycle, not an enforcement gate.
+    """
     DRAFT = "draft"      # Schema/transform work in progress
     READY = "ready"      # Code complete, awaiting Terraform + migration + secrets
     LIVE = "live"        # Deployed, EventBridge running, data flowing

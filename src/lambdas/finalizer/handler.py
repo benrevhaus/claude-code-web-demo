@@ -1,7 +1,11 @@
-"""Run-finalizer Lambda handler.
+"""DORMANT — Run-finalizer Lambda handler (4-Lambda architecture, ADR-021).
 
-Closes run record, updates cursor, computes freshness, emits CloudWatch metrics.
-Always runs — even after partial failure.
+NOT DEPLOYED. The MVP uses stream_runner (single Lambda) instead.
+Preserved for potential Tier 3 scale-up (ADR-022).
+See docs/roadmap/not-building.md for dormant components.
+
+Original purpose: close run record, update cursor, compute freshness,
+emit CloudWatch metrics. Always runs — even after partial failure.
 """
 
 from __future__ import annotations

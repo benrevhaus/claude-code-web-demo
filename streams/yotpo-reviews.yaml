@@ -1,0 +1,33 @@
+apiVersion: streams/v1
+status: ready
+
+source: yotpo
+stream: reviews
+display_name: Yotpo Reviews
+
+mode: rest
+api_version: "v1"
+endpoint: reviews
+
+schedule: rate(15 minutes)
+backfill_enabled: true
+
+schema_version: yotpo.review.v1
+normalizes_to: product_review
+
+idempotency_key:
+  - review_id
+  - updated_at
+cursor_field: updated_at
+cursor_type: datetime
+
+freshness_sla_minutes: 30
+max_pages_per_run: 500
+page_size: 100
+rate_limit_bucket: yotpo
+
+owner: platform
+tags:
+  - reviews
+  - yotpo
+  - ecommerce

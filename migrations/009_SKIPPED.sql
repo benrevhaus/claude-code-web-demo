@@ -1,0 +1,9 @@
+-- Migration 009 was skipped.
+--
+-- Migrations 001-008 cover the Shopify and Gorgias source schemas.
+-- Migration 010 begins the GA4 analytics dashboard track.
+-- The numbering gap is intentional — 009 was reserved for a planned
+-- GA4 webhook events schema (ADR-026) that was ultimately merged into
+-- the analytics track starting at 010.
+--
+-- This file exists to document the gap. It contains no DDL.

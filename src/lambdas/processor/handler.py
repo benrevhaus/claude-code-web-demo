@@ -1,7 +1,11 @@
-"""Processor Lambda handler.
+"""DORMANT — Processor Lambda handler (4-Lambda architecture, ADR-021).
 
-Reads raw from S3 → validates schema → transforms to canonical → upserts Postgres.
-Stateless and deterministic: same S3 input → same Postgres output.
+NOT DEPLOYED. The MVP uses stream_runner (single Lambda) instead.
+Preserved for potential Tier 3 scale-up (ADR-022).
+See docs/roadmap/not-building.md for dormant components.
+
+Original purpose: read raw from S3 → validate schema → transform to
+canonical → upsert Postgres. Stateless and deterministic.
 """
 
 from __future__ import annotations

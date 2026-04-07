@@ -51,21 +51,25 @@ and above:
 
 ## Required Published Tables
 
-### `generalized_reviews_current`
+All generalized tables live in the `reviews` Postgres schema within the shared Aurora database. Source-canonical tables live in source-scoped schemas (e.g., `yotpo.*`).
+
+### `reviews.generalized_reviews_current`
 
 Broad-access current-state published review table.
 
-### `generalized_review_identity_links`
+### `reviews.generalized_review_identity_links`
 
 Restricted companion table keyed by `canonical_record_id`.
 
 Contains private linkage fields and current identity match state for all staged rows, including rows not currently published.
 
-### `generalized_review_publish_exceptions`
+Access is controlled via the platform-wide `data_operator` Postgres role. The broad `data_reader` role cannot query this table.
+
+### `reviews.generalized_review_publish_exceptions`
 
 Current-state table for rows excluded from publication.
 
-### `generalized_review_publish_audit`
+### `reviews.generalized_review_publish_audit`
 
 Current-state audit table recording publication decision details, diagnostics, winning-source choices, and evaluation timestamps.
 
@@ -260,7 +264,7 @@ Capability flags prevent false interpretation of zero as universal support.
 
 ## Restricted Identity Companion
 
-`generalized_review_identity_links` is keyed by `canonical_record_id` and holds:
+`reviews.generalized_review_identity_links` is keyed by `canonical_record_id` and holds:
 
 - raw and normalized private match keys
 - source user/customer references
@@ -274,9 +278,19 @@ Phase 1 keeps only the current identity state, not historical identity versions.
 
 If source identity changes, the system overwrites in place and updates diagnostics.
 
+### Access control
+
+Access to the restricted identity companion is enforced at the Postgres level:
+
+- The platform-wide `data_operator` role has `SELECT` on `reviews.generalized_review_identity_links`
+- Only connections that need private linkage (e.g., Customer 360) are granted this role
+- The broad `data_reader` role has `SELECT` on all other `reviews.*` tables but not the identity companion
+- This is enforced in the database, not at the application layer
+- The same `data_reader` / `data_operator` roles apply uniformly across all schemas (shopify, gorgias, yotpo, reviews, analytics, control)
+
 ## Audit And Exceptions
 
-### `generalized_review_publish_exceptions`
+### `reviews.generalized_review_publish_exceptions`
 
 Current-state only.
 
@@ -292,7 +306,7 @@ Includes:
 - `last_seen_at`
 - supporting diagnostics
 
-### `generalized_review_publish_audit`
+### `reviews.generalized_review_publish_audit`
 
 Current-state only.
 

@@ -19,6 +19,7 @@ const configSchema = z.object({
   GA4_PRIVATE_KEY: z.string().default("mock-private-key"),
   GA4_KEY_FILE: z.string().optional(),
   GA4_DEFAULT_BACKFILL_DAYS: z.coerce.number().default(90),
+  DATA_START_DATE: z.string().default("2026-04-04"),
   USE_MOCK_GA4: z
     .string()
     .optional()

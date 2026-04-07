@@ -15,9 +15,10 @@ type Props = {
   onReset: () => void;
   onSaveSearch: () => void;
   onQuickRange: (days: number) => void;
+  minDate?: string;
 };
 
-export function FilterBar({ filters, options, onChange, onReset, onSaveSearch, onQuickRange }: Props) {
+export function FilterBar({ filters, options, onChange, onReset, onSaveSearch, onQuickRange, minDate }: Props) {
   const selectedEventNames = filters.eventNames ?? [];
 
   function toggleEventName(eventName: string) {
@@ -53,11 +54,11 @@ export function FilterBar({ filters, options, onChange, onReset, onSaveSearch, o
       <div className="filters-grid">
         <label>
           Start
-          <input type="date" value={filters.startDate} onChange={(e) => onChange({ startDate: e.target.value })} />
+          <input type="date" value={filters.startDate} min={minDate} onChange={(e) => onChange({ startDate: e.target.value })} />
         </label>
         <label>
           End
-          <input type="date" value={filters.endDate} onChange={(e) => onChange({ endDate: e.target.value })} />
+          <input type="date" value={filters.endDate} min={minDate} onChange={(e) => onChange({ endDate: e.target.value })} />
         </label>
         <label>
           Search

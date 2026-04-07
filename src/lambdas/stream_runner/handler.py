@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from src.shared.brandhaus_writer import BrandhausWriter, is_dual_write_enabled
 from src.shared.gorgias_client import GorgiasTicketsClient
 from src.shared.observability import MetricsClient, setup_logging
+from src.shared.yotpo_client import YotpoClient
 from src.shared.pg_client import PgClient
 from src.shared.s3_writer import S3Writer
 from src.shared.schema_registry import get_schema
@@ -32,6 +33,7 @@ _metrics: MetricsClient | None = None
 _brandhaus: BrandhausWriter | None = None
 _shopify_clients: dict[str, ShopifyGraphQLClient] = {}
 _gorgias_client = None
+_yotpo_client = None
 
 
 def _get_s3_writer() -> S3Writer:
@@ -71,6 +73,8 @@ def _get_provider_client(source: str, stream: str = "orders"):
         return _shopify_clients[stream]
     if source == "gorgias":
         return _gorgias_client or GorgiasTicketsClient()
+    if source == "yotpo":
+        return _yotpo_client or YotpoClient()
     raise ValueError(f"Unsupported source: {source}")
 
 
@@ -270,6 +274,16 @@ def handler(event: dict, context=None) -> dict:
             pages=page_number,
             records=processed,
         )
+
+    # Yotpo publication: last-writer-wins (ADR-034)
+    if source == "yotpo" and status in ("success", "partial_failure"):
+        try:
+            from src.shared.review_publisher import check_publication_readiness, run_publication_pass
+            if check_publication_readiness(pg, source, store_id):
+                pub_result = run_publication_pass(pg, store_id, run_id)
+                log.info("Publication triggered by stream", stream=stream, **pub_result)
+        except Exception as pub_err:
+            log.error("Publication pass failed (source ingest succeeded)", error=str(pub_err))
 
     # Emit metrics
     metrics.emit_records(source, stream, processed, skipped, failed)

@@ -1,0 +1,28 @@
+{
+  "id": 982341771,
+  "score": 5,
+  "title": "Great product",
+  "content": "This product exceeded my expectations. Would highly recommend.",
+  "sentiment": 0.95,
+  "votes_up": 12,
+  "votes_down": 1,
+  "product_id": 44556677,
+  "domain_key": "35677700",
+  "sku": "SKU-001",
+  "reviewer_type": "verified_buyer",
+  "verified_buyer": true,
+  "source_review_id": 982341770,
+  "name": "Jane D.",
+  "email": "jane@example.com",
+  "images_data": [
+    {
+      "id": 1001,
+      "thumb_url": "https://cdn.yotpo.com/thumb_1.jpg",
+      "original_url": "https://cdn.yotpo.com/original_1.jpg"
+    }
+  ],
+  "videos_data": [],
+  "deleted": false,
+  "created_at": "2025-11-15T10:30:00.000Z",
+  "updated_at": "2026-01-20T14:22:00.000Z"
+}

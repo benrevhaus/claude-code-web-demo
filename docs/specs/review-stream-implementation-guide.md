@@ -106,12 +106,12 @@ Rules:
 
 ### Layer 4: Generalized published current tables
 
-Examples:
+All in the `reviews` Postgres schema:
 
-- `generalized_reviews_current`
-- `generalized_review_identity_links`
-- `generalized_review_publish_exceptions`
-- `generalized_review_publish_audit`
+- `reviews.generalized_reviews_current`
+- `reviews.generalized_review_identity_links`
+- `reviews.generalized_review_publish_exceptions`
+- `reviews.generalized_review_publish_audit`
 
 Purpose:
 
@@ -176,9 +176,18 @@ Reason:
 - no stronger documented review-level media stream contract has been committed yet
 - the architecture remains open to future media repair streams if truncation or divergence appears
 
+## Postgres Schema Layout
+
+All tables live in the same Aurora database. Logical separation uses Postgres schemas:
+
+- `yotpo.*` — source-canonical tables (Yotpo-shaped)
+- `reviews.*` — generalized publication tables, identity companion, exceptions, and audit
+
+Cross-schema joins work natively within the same database — no `dblink` or `postgres_fdw` needed.
+
 ## Source-Canonical Table Plan
 
-Recommended table families for Yotpo phase 1:
+Recommended table families for Yotpo phase 1 (all in the `yotpo` Postgres schema):
 
 - `yotpo.reviews_raw_current`
 - `yotpo.review_metadata_current`
@@ -263,9 +272,28 @@ Minimum responsibilities:
 - started/completed times
 - error message when failed
 
+## Publication Orchestration
+
+### Last-writer-wins model
+
+No new Lambda, Step Function, or schedule is introduced for the publication pass.
+
+Each source stream_runner checks after its own ingest whether the other required stream's source data is fresh enough (using cursor timestamps or snapshot run status). If both streams are current, the finishing stream_runner runs the publication pass inline — building `reviews.yotpo_reviews_current`, then `reviews.generalized_reviews_current` and all companion tables in one pass.
+
+This means:
+
+- no new orchestration infrastructure
+- publication happens naturally as part of the last stream to complete
+- if one stream fails repeatedly, publication stalls — caught by existing freshness alarm patterns
+- the snapshot set is created by the stream_runner that triggers publication
+
+### Failure handling
+
+If the publication pass itself fails (e.g., a transform error), the source data is still safely ingested. The next successful stream_runner invocation will retry publication.
+
 ## Publication Artifacts
 
-### `yotpo_reviews_current`
+### `reviews.yotpo_reviews_current`
 
 Joined Yotpo-specific current table built from:
 
@@ -285,15 +313,15 @@ This table should preserve Yotpo-native semantics where useful, but can already 
 - `state`
 - embedded media with metadata enrichment applied where appropriate
 
-### `generalized_reviews_current`
+### `reviews.generalized_reviews_current`
 
 Official downstream published contract.
 
-Built from `yotpo_reviews_current` and generalized publication rules.
+Built from `reviews.yotpo_reviews_current` and generalized publication rules.
 
 This table should follow the contract in [Generalized Reviews Contract](./generalized-reviews-contract.md).
 
-### `generalized_review_identity_links`
+### `reviews.generalized_review_identity_links`
 
 Restricted companion keyed by `canonical_record_id`.
 
@@ -306,7 +334,7 @@ Purpose:
 
 Rules:
 
-- do not expose broad-access customer linkage on `generalized_reviews_current`
+- do not expose broad-access customer linkage on `reviews.generalized_reviews_current`
 - identity state is current-state only
 - overwrite in place when source identity changes
 - keep lightweight diagnostics such as:
@@ -314,7 +342,14 @@ Rules:
   - `last_identity_changed_at`
   - `is_published`
 
-### `generalized_review_publish_exceptions`
+Access control:
+
+- The platform-wide `data_operator` Postgres role has `SELECT` on this table
+- The broad `data_reader` role has `SELECT` on all other `reviews.*` tables but not this one
+- Enforced at the database level, not the application layer
+- Same roles apply across all schemas (see migration 016)
+
+### `reviews.generalized_review_publish_exceptions`
 
 Current-state only.
 
@@ -329,7 +364,7 @@ Rules:
 - update `last_seen_at`
 - remove the row once the review becomes publishable
 
-### `generalized_review_publish_audit`
+### `reviews.generalized_review_publish_audit`
 
 Current-state only.
 
@@ -371,7 +406,7 @@ Every published row must include:
 
 If any are missing:
 
-- do not publish the row to `generalized_reviews_current`
+- do not publish the row to `reviews.generalized_reviews_current`
 - do retain it in source-canonical storage
 - do allow the restricted identity table to keep staged/debuggable linkage info when available
 - do write/update its exception row
@@ -541,7 +576,7 @@ Winning-source diagnostics should live in the current-state publish audit table,
 
 ## Restricted Identity Table: Implementation Rules
 
-This table is not optional for phase 1.
+This table (`reviews.generalized_review_identity_links`) is not optional for phase 1.
 
 Purpose:
 
@@ -593,8 +628,8 @@ It does not mean literal perfection.
 
 Only after source baseline completion:
 
-1. build `yotpo_reviews_current`
-2. build `generalized_reviews_current`
+1. build `reviews.yotpo_reviews_current`
+2. build `reviews.generalized_reviews_current`
 3. build identity/exceptions/audit outputs
 
 The first successful internal generalized publication becomes the authoritative baseline snapshot for later comparisons.
@@ -661,13 +696,13 @@ Rules:
 - source-canonical remains Yotpo-shaped
 - preserve raw payload JSON where approved
 
-### Step 3: create source-canonical tables and snapshot tracking tables
+### Step 3: create source-canonical tables, publication tables, and access control
 
 Add migrations for:
 
-- review current table
-- metadata current table
-- snapshot set and run tracking
+- `yotpo` schema + source-canonical tables (review current, metadata current, snapshot set/run tracking)
+- `reviews` schema + all publication tables (yotpo_reviews_current, generalized_reviews_current, identity links, exceptions, audit)
+- Platform-wide Postgres roles (migration 016): `data_reader` with `SELECT` on non-PII tables across all schemas; `data_operator` with `SELECT` on PII/identity tables including `reviews.generalized_review_identity_links`
 
 ### Step 4: implement source ingestion and source validation
 
@@ -678,7 +713,7 @@ Implement:
 - snapshot set/run state transitions
 - count and completeness metrics
 
-### Step 5: build `yotpo_reviews_current`
+### Step 5: build `reviews.yotpo_reviews_current`
 
 Implement source-specific current join logic.
 

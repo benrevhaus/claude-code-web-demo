@@ -1,0 +1,30 @@
+apiVersion: streams/v1
+status: ready
+
+source: ga4
+stream: events
+display_name: GA4 Events
+
+mode: webhook
+api_version: "v1"
+
+schema_version: ga4.event.v1
+normalizes_to: analytics_event
+
+idempotency_key:
+  - event_id
+  - event_timestamp
+
+freshness_sla_minutes: 15
+max_pages_per_run: 1
+page_size: 1
+rate_limit_bucket: ga4
+
+webhook_topics:
+  - events
+
+owner: platform
+tags:
+  - ga4
+  - analytics
+  - events

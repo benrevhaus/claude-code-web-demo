@@ -531,6 +531,134 @@ class PgClient:
         with self._conn.cursor() as cur:
             cur.execute(sql, params)
 
+    # ── Yotpo Reviews ───────────────────────────────────────────────────
+
+    def upsert_review(self, review: BaseModel, s3_key: str, schema_version: str, run_id: Optional[str] = None) -> bool:
+        self._ensure_connection()
+        data = review.model_dump()
+        sql = """
+            INSERT INTO yotpo.reviews_raw_current (
+                id, store_id, score, title, content, sentiment,
+                votes_up, votes_down, product_yotpo_id, domain_key,
+                reviewer_type, verified_buyer, source_review_id,
+                images_data, videos_data, name, email, deleted,
+                created_at, updated_at, raw_payload,
+                raw_s3_key, schema_version, run_id
+            ) VALUES (
+                %(id)s, %(store_id)s, %(score)s, %(title)s, %(content)s, %(sentiment)s,
+                %(votes_up)s, %(votes_down)s, %(product_yotpo_id)s, %(domain_key)s,
+                %(reviewer_type)s, %(verified_buyer)s, %(source_review_id)s,
+                %(images_data)s, %(videos_data)s, %(name)s, %(email)s, %(deleted)s,
+                %(created_at)s, %(updated_at)s, %(raw_payload)s,
+                %(raw_s3_key)s, %(schema_version)s, %(run_id)s
+            )
+            ON CONFLICT (id, store_id) DO UPDATE SET
+                score = EXCLUDED.score, title = EXCLUDED.title,
+                content = EXCLUDED.content, sentiment = EXCLUDED.sentiment,
+                votes_up = EXCLUDED.votes_up, votes_down = EXCLUDED.votes_down,
+                product_yotpo_id = EXCLUDED.product_yotpo_id, domain_key = EXCLUDED.domain_key,
+                reviewer_type = EXCLUDED.reviewer_type, verified_buyer = EXCLUDED.verified_buyer,
+                source_review_id = EXCLUDED.source_review_id,
+                images_data = EXCLUDED.images_data, videos_data = EXCLUDED.videos_data,
+                name = EXCLUDED.name, email = EXCLUDED.email,
+                deleted = EXCLUDED.deleted,
+                created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at,
+                raw_payload = EXCLUDED.raw_payload,
+                raw_s3_key = EXCLUDED.raw_s3_key, schema_version = EXCLUDED.schema_version,
+                ingested_at = NOW(), run_id = EXCLUDED.run_id
+            WHERE yotpo.reviews_raw_current.updated_at < EXCLUDED.updated_at
+                OR yotpo.reviews_raw_current.updated_at IS NULL
+        """
+        params = {
+            "id": data["id"], "store_id": data["store_id"],
+            "score": data.get("score"), "title": data.get("title"),
+            "content": data.get("content"), "sentiment": data.get("sentiment"),
+            "votes_up": data.get("votes_up", 0), "votes_down": data.get("votes_down", 0),
+            "product_yotpo_id": data.get("product_yotpo_id"),
+            "domain_key": data.get("domain_key"),
+            "reviewer_type": data.get("reviewer_type"),
+            "verified_buyer": data.get("verified_buyer"),
+            "source_review_id": data.get("source_review_id"),
+            "images_data": json.dumps(data.get("images_data", [])),
+            "videos_data": json.dumps(data.get("videos_data", [])),
+            "name": data.get("name"),
+            "email": data.get("email"),
+            "deleted": data.get("deleted", False),
+            "created_at": data.get("created_at"), "updated_at": data.get("updated_at"),
+            "raw_payload": json.dumps(data, default=str),
+            "raw_s3_key": s3_key, "schema_version": schema_version, "run_id": run_id,
+        }
+        with self._conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.rowcount > 0
+
+    def insert_review_history(self, review: BaseModel, run_id: Optional[str] = None) -> None:
+        self._ensure_connection()
+        data = review.model_dump()
+        sql = """
+            INSERT INTO yotpo.reviews_raw_history (review_id, store_id, snapshot, changed_at, run_id)
+            VALUES (%(review_id)s, %(store_id)s, %(snapshot)s, %(changed_at)s, %(run_id)s)
+            ON CONFLICT (review_id, store_id, changed_at) DO NOTHING
+        """
+        params = {
+            "review_id": data["id"], "store_id": data["store_id"],
+            "snapshot": json.dumps(data, default=str),
+            "changed_at": data["updated_at"], "run_id": run_id,
+        }
+        with self._conn.cursor() as cur:
+            cur.execute(sql, params)
+
+    # ── Yotpo Review Metadata ────────────────────────────────────────────
+
+    def upsert_review_metadata(self, metadata: BaseModel, s3_key: str, schema_version: str, run_id: Optional[str] = None) -> bool:
+        self._ensure_connection()
+        data = metadata.model_dump()
+        sql = """
+            INSERT INTO yotpo.review_metadata_current (
+                review_id, store_id, country, country_code, state, state_code,
+                raw_payload, raw_s3_key, schema_version, run_id, updated_at
+            ) VALUES (
+                %(review_id)s, %(store_id)s, %(country)s, %(country_code)s,
+                %(state)s, %(state_code)s,
+                %(raw_payload)s, %(raw_s3_key)s, %(schema_version)s, %(run_id)s, %(updated_at)s
+            )
+            ON CONFLICT (review_id, store_id) DO UPDATE SET
+                country = EXCLUDED.country, country_code = EXCLUDED.country_code,
+                state = EXCLUDED.state, state_code = EXCLUDED.state_code,
+                raw_payload = EXCLUDED.raw_payload,
+                raw_s3_key = EXCLUDED.raw_s3_key, schema_version = EXCLUDED.schema_version,
+                ingested_at = NOW(), run_id = EXCLUDED.run_id, updated_at = EXCLUDED.updated_at
+            WHERE yotpo.review_metadata_current.updated_at < EXCLUDED.updated_at
+                OR yotpo.review_metadata_current.updated_at IS NULL
+        """
+        params = {
+            "review_id": data["review_id"], "store_id": data["store_id"],
+            "country": data.get("country"), "country_code": data.get("country_code"),
+            "state": data.get("state"), "state_code": data.get("state_code"),
+            "raw_payload": json.dumps(data, default=str),
+            "raw_s3_key": s3_key, "schema_version": schema_version,
+            "run_id": run_id, "updated_at": data.get("updated_at"),
+        }
+        with self._conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.rowcount > 0
+
+    def insert_review_metadata_history(self, metadata: BaseModel, run_id: Optional[str] = None) -> None:
+        self._ensure_connection()
+        data = metadata.model_dump()
+        sql = """
+            INSERT INTO yotpo.review_metadata_history (review_id, store_id, snapshot, changed_at, run_id)
+            VALUES (%(review_id)s, %(store_id)s, %(snapshot)s, %(changed_at)s, %(run_id)s)
+            ON CONFLICT (review_id, store_id, changed_at) DO NOTHING
+        """
+        params = {
+            "review_id": data["review_id"], "store_id": data["store_id"],
+            "snapshot": json.dumps(data, default=str),
+            "changed_at": data.get("updated_at"), "run_id": run_id,
+        }
+        with self._conn.cursor() as cur:
+            cur.execute(sql, params)
+
     # ── GA4 Events ───────────────────────────────────────────────────────
 
     def upsert_ga4_event(self, event: BaseModel, s3_key: str, schema_version: str, run_id: Optional[str] = None) -> bool:

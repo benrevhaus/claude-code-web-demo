@@ -1,7 +1,11 @@
-"""Poller Lambda handler.
+"""DORMANT — Poller Lambda handler (4-Lambda architecture, ADR-021).
 
-Fetches one page from a provider API, writes raw to S3, returns cursor info.
-This handler is THIN — it delegates to shared libs for all logic.
+NOT DEPLOYED. The MVP uses stream_runner (single Lambda) instead.
+Preserved for potential Tier 3 scale-up (ADR-022).
+See docs/roadmap/not-building.md for dormant components.
+
+Original purpose: fetch one page from a provider API, write raw to S3,
+return cursor info. Thin — delegates to shared libs.
 """
 
 from __future__ import annotations

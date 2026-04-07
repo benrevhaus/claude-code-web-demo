@@ -10,6 +10,9 @@ from schemas.canonical.ga4.event_v1 import GA4EventV1
 from schemas.canonical.ga4.transforms import transform_ga4_event
 from schemas.canonical.gorgias.ticket_v1 import GorgiasTicketV1
 from schemas.canonical.gorgias.transforms import transform_gorgias_ticket
+from schemas.canonical.yotpo.review_metadata_v1 import YotpoReviewMetadataV1
+from schemas.canonical.yotpo.review_v1 import YotpoReviewV1
+from schemas.canonical.yotpo.transforms import transform_yotpo_review, transform_yotpo_review_metadata
 from schemas.canonical.shopify.customer_v1 import ShopifyCustomerV1
 from schemas.canonical.shopify.inventory_v1 import ShopifyInventoryLevelV1
 from schemas.canonical.shopify.order_v3 import ShopifyOrderV3
@@ -26,6 +29,8 @@ from schemas.canonical.shopify.transforms import (
 )
 from schemas.raw.ga4.event import GA4EventRaw, GA4EventsPageRaw
 from schemas.raw.gorgias.ticket import GorgiasTicketRaw, GorgiasTicketsPageRaw
+from schemas.raw.yotpo.review import YotpoReviewRaw, YotpoReviewsPageRaw
+from schemas.raw.yotpo.review_metadata import YotpoReviewMetadataRaw, YotpoReviewMetadataPageRaw
 from schemas.raw.shopify.customer import ShopifyCustomerRaw, ShopifyCustomersPageRaw
 from schemas.raw.shopify.inventory import ShopifyInventoryItemRaw, ShopifyInventoryPageRaw
 from schemas.raw.shopify.order import ShopifyOrderRaw, ShopifyOrdersPageRaw
@@ -170,6 +175,32 @@ SCHEMA_REGISTRY: dict[tuple[str, str], SchemaEntry] = {
         idempotency_field_map={"ticket_id": "id", "updated_datetime": "updated_datetime"},
         pg_upsert_method="upsert_ticket",
         pg_history_method="insert_ticket_history",
+    ),
+    ("yotpo", "reviews"): SchemaEntry(
+        raw_model=YotpoReviewRaw,
+        raw_page_model=YotpoReviewsPageRaw,
+        canonical_model=YotpoReviewV1,
+        transform=transform_yotpo_review,
+        pg_table="yotpo.reviews_raw_current",
+        pg_history_table="yotpo.reviews_raw_history",
+        version="yotpo.review.v1",
+        record_list_field="reviews",
+        idempotency_field_map={"review_id": "id", "updated_at": "updated_at"},
+        pg_upsert_method="upsert_review",
+        pg_history_method="insert_review_history",
+    ),
+    ("yotpo", "review-metadata"): SchemaEntry(
+        raw_model=YotpoReviewMetadataRaw,
+        raw_page_model=YotpoReviewMetadataPageRaw,
+        canonical_model=YotpoReviewMetadataV1,
+        transform=transform_yotpo_review_metadata,
+        pg_table="yotpo.review_metadata_current",
+        pg_history_table="yotpo.review_metadata_history",
+        version="yotpo.review-metadata.v1",
+        record_list_field="metadata",
+        idempotency_field_map={"review_id": "review_id", "updated_at": "updated_at"},
+        pg_upsert_method="upsert_review_metadata",
+        pg_history_method="insert_review_metadata_history",
     ),
     ("ga4", "events"): SchemaEntry(
         raw_model=GA4EventRaw,

@@ -128,18 +128,18 @@ resource "aws_security_group" "aurora" {
 }
 
 resource "aws_rds_cluster" "main" {
-  cluster_identifier       = "${local.prefix}-${local.env}"
-  engine                   = "aurora-postgresql"
-  engine_mode              = "provisioned"
-  engine_version           = "15.4"
-  database_name            = "datastreams"
-  master_username          = "datastreams"
-  master_password          = var.db_master_password
-  db_subnet_group_name     = aws_db_subnet_group.aurora.name
-  vpc_security_group_ids   = [aws_security_group.aurora.id]
-  skip_final_snapshot      = false
+  cluster_identifier        = "${local.prefix}-${local.env}"
+  engine                    = "aurora-postgresql"
+  engine_mode               = "provisioned"
+  engine_version            = "15.4"
+  database_name             = "datastreams"
+  master_username           = "datastreams"
+  master_password           = var.db_master_password
+  db_subnet_group_name      = aws_db_subnet_group.aurora.name
+  vpc_security_group_ids    = [aws_security_group.aurora.id]
+  skip_final_snapshot       = false
   final_snapshot_identifier = "${local.prefix}-${local.env}-final"
-  storage_encrypted        = true
+  storage_encrypted         = true
 
   serverlessv2_scaling_configuration {
     min_capacity = 0.5
@@ -212,6 +212,22 @@ resource "aws_ssm_parameter" "gorgias_api_key" {
   lifecycle { ignore_changes = [value] }
 }
 
+resource "aws_ssm_parameter" "yotpo_app_key" {
+  name  = "/${local.prefix}/${local.env}/yotpo/app_key"
+  type  = "SecureString"
+  value = "PLACEHOLDER"
+
+  lifecycle { ignore_changes = [value] }
+}
+
+resource "aws_ssm_parameter" "yotpo_secret_key" {
+  name  = "/${local.prefix}/${local.env}/yotpo/secret_key"
+  type  = "SecureString"
+  value = "PLACEHOLDER"
+
+  lifecycle { ignore_changes = [value] }
+}
+
 resource "aws_ssm_parameter" "postgres_connection_string" {
   name  = "/${local.prefix}/${local.env}/postgres/connection_string"
   type  = "SecureString"
@@ -240,7 +256,7 @@ resource "aws_sns_topic_subscription" "email" {
 # -----------------------------------------------------------------------------
 
 resource "aws_iam_role" "stream_runner" {
-  for_each = toset(["shopify-orders", "shopify-customers", "shopify-products", "shopify-inventory", "gorgias-tickets"])
+  for_each = toset(["shopify-orders", "shopify-customers", "shopify-products", "shopify-inventory", "gorgias-tickets", "yotpo-reviews", "yotpo-review-metadata"])
 
   name = "${local.prefix}-runner-${each.key}-${local.env}"
 
@@ -255,7 +271,7 @@ resource "aws_iam_role" "stream_runner" {
 }
 
 resource "aws_iam_role_policy" "stream_runner" {
-  for_each = toset(["shopify-orders", "shopify-customers", "shopify-products", "shopify-inventory", "gorgias-tickets"])
+  for_each = toset(["shopify-orders", "shopify-customers", "shopify-products", "shopify-inventory", "gorgias-tickets", "yotpo-reviews", "yotpo-review-metadata"])
 
   name = "stream-runner-policy"
   role = aws_iam_role.stream_runner[each.key].id
@@ -264,27 +280,27 @@ resource "aws_iam_role_policy" "stream_runner" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "S3ReadWrite"
-        Effect = "Allow"
-        Action = ["s3:PutObject", "s3:GetObject"]
+        Sid      = "S3ReadWrite"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:GetObject"]
         Resource = "${aws_s3_bucket.raw.arn}/*"
       },
       {
-        Sid    = "SSMRead"
-        Effect = "Allow"
-        Action = ["ssm:GetParameter", "ssm:GetParameters"]
+        Sid      = "SSMRead"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter", "ssm:GetParameters"]
         Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/${local.prefix}/${local.env}/*"
       },
       {
-        Sid    = "CloudWatchMetrics"
-        Effect = "Allow"
-        Action = ["cloudwatch:PutMetricData"]
+        Sid      = "CloudWatchMetrics"
+        Effect   = "Allow"
+        Action   = ["cloudwatch:PutMetricData"]
         Resource = "*"
       },
       {
-        Sid    = "Logs"
-        Effect = "Allow"
-        Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Sid      = "Logs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:*"
       },
     ]
@@ -447,8 +463,8 @@ resource "aws_cloudwatch_event_rule" "shopify_customers" {
 }
 
 resource "aws_cloudwatch_event_target" "shopify_customers" {
-  rule = aws_cloudwatch_event_rule.shopify_customers.name
-  arn  = aws_lambda_function.shopify_customers.arn
+  rule  = aws_cloudwatch_event_rule.shopify_customers.name
+  arn   = aws_lambda_function.shopify_customers.arn
   input = jsonencode({ source = "shopify", stream = "customers", store_id = var.shopify_store_id })
 }
 
@@ -498,8 +514,8 @@ resource "aws_cloudwatch_event_rule" "shopify_products" {
 }
 
 resource "aws_cloudwatch_event_target" "shopify_products" {
-  rule = aws_cloudwatch_event_rule.shopify_products.name
-  arn  = aws_lambda_function.shopify_products.arn
+  rule  = aws_cloudwatch_event_rule.shopify_products.name
+  arn   = aws_lambda_function.shopify_products.arn
   input = jsonencode({ source = "shopify", stream = "products", store_id = var.shopify_store_id })
 }
 
@@ -549,8 +565,8 @@ resource "aws_cloudwatch_event_rule" "shopify_inventory" {
 }
 
 resource "aws_cloudwatch_event_target" "shopify_inventory" {
-  rule = aws_cloudwatch_event_rule.shopify_inventory.name
-  arn  = aws_lambda_function.shopify_inventory.arn
+  rule  = aws_cloudwatch_event_rule.shopify_inventory.name
+  arn   = aws_lambda_function.shopify_inventory.arn
   input = jsonencode({ source = "shopify", stream = "inventory", store_id = var.shopify_store_id })
 }
 
@@ -563,18 +579,120 @@ resource "aws_lambda_permission" "shopify_inventory_eventbridge" {
 }
 
 # -----------------------------------------------------------------------------
+# Lambda + EventBridge — Yotpo Reviews (15 min)
+# -----------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "yotpo_reviews" {
+  name              = "/aws/lambda/${local.prefix}-runner-yotpo-reviews-${local.env}"
+  retention_in_days = 30
+}
+
+resource "aws_lambda_function" "yotpo_reviews" {
+  function_name = "${local.prefix}-runner-yotpo-reviews-${local.env}"
+  role          = aws_iam_role.stream_runner["yotpo-reviews"].arn
+  handler       = "src.lambdas.stream_runner.handler.handler"
+  runtime       = "python3.12"
+  timeout       = 900
+  memory_size   = 512
+
+  filename         = var.lambda_package_file
+  source_code_hash = filebase64sha256(var.lambda_package_file)
+
+  environment {
+    variables = {
+      RAW_BUCKET = aws_s3_bucket.raw.bucket
+      ENV        = local.env
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_group.yotpo_reviews]
+  lifecycle { ignore_changes = [filename, source_code_hash] }
+}
+
+resource "aws_cloudwatch_event_rule" "yotpo_reviews" {
+  name                = "${local.prefix}-yotpo-reviews-${local.env}"
+  schedule_expression = "rate(15 minutes)"
+  state               = "ENABLED"
+}
+
+resource "aws_cloudwatch_event_target" "yotpo_reviews" {
+  rule  = aws_cloudwatch_event_rule.yotpo_reviews.name
+  arn   = aws_lambda_function.yotpo_reviews.arn
+  input = jsonencode({ source = "yotpo", stream = "reviews", store_id = var.yotpo_store_id })
+}
+
+resource "aws_lambda_permission" "yotpo_reviews_eventbridge" {
+  statement_id  = "AllowEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.yotpo_reviews.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.yotpo_reviews.arn
+}
+
+# -----------------------------------------------------------------------------
+# Lambda + EventBridge — Yotpo Review Metadata (60 min)
+# -----------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "yotpo_review_metadata" {
+  name              = "/aws/lambda/${local.prefix}-runner-yotpo-review-metadata-${local.env}"
+  retention_in_days = 30
+}
+
+resource "aws_lambda_function" "yotpo_review_metadata" {
+  function_name = "${local.prefix}-runner-yotpo-review-metadata-${local.env}"
+  role          = aws_iam_role.stream_runner["yotpo-review-metadata"].arn
+  handler       = "src.lambdas.stream_runner.handler.handler"
+  runtime       = "python3.12"
+  timeout       = 900
+  memory_size   = 512
+
+  filename         = var.lambda_package_file
+  source_code_hash = filebase64sha256(var.lambda_package_file)
+
+  environment {
+    variables = {
+      RAW_BUCKET = aws_s3_bucket.raw.bucket
+      ENV        = local.env
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_group.yotpo_review_metadata]
+  lifecycle { ignore_changes = [filename, source_code_hash] }
+}
+
+resource "aws_cloudwatch_event_rule" "yotpo_review_metadata" {
+  name                = "${local.prefix}-yotpo-review-metadata-${local.env}"
+  schedule_expression = "rate(60 minutes)"
+  state               = "ENABLED"
+}
+
+resource "aws_cloudwatch_event_target" "yotpo_review_metadata" {
+  rule  = aws_cloudwatch_event_rule.yotpo_review_metadata.name
+  arn   = aws_lambda_function.yotpo_review_metadata.arn
+  input = jsonencode({ source = "yotpo", stream = "review-metadata", store_id = var.yotpo_store_id })
+}
+
+resource "aws_lambda_permission" "yotpo_review_metadata_eventbridge" {
+  statement_id  = "AllowEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.yotpo_review_metadata.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.yotpo_review_metadata.arn
+}
+
+# -----------------------------------------------------------------------------
 # SQS — Webhook queue + DLQ
 # -----------------------------------------------------------------------------
 
 resource "aws_sqs_queue" "webhook_dlq" {
   name                      = "${local.prefix}-webhooks-dlq-${local.env}"
-  message_retention_seconds = 1209600  # 14 days
+  message_retention_seconds = 1209600 # 14 days
 }
 
 resource "aws_sqs_queue" "webhooks" {
   name                       = "${local.prefix}-webhooks-${local.env}"
   visibility_timeout_seconds = 60
-  message_retention_seconds  = 345600  # 4 days
+  message_retention_seconds  = 345600 # 4 days
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.webhook_dlq.arn
@@ -589,12 +707,12 @@ resource "aws_sqs_queue" "webhooks" {
 module "webhook" {
   source = "../../modules/stream-webhook"
 
-  env                  = local.env
-  source_name          = "shopify"
-  stream_name          = "webhooks"
+  env                   = local.env
+  source_name           = "shopify"
+  stream_name           = "webhooks"
   sqs_process_queue_url = aws_sqs_queue.webhooks.url
   sqs_process_queue_arn = aws_sqs_queue.webhooks.arn
-  tags                 = { Project = "data-streams", Environment = local.env, ManagedBy = "terraform" }
+  tags                  = { Project = "data-streams", Environment = local.env, ManagedBy = "terraform" }
 }
 
 # -----------------------------------------------------------------------------
@@ -659,12 +777,12 @@ resource "aws_cloudwatch_log_group" "webhook_consumer" {
 }
 
 resource "aws_lambda_function" "webhook_consumer" {
-  function_name    = "${local.prefix}-webhook-consumer-${local.env}"
-  role             = aws_iam_role.webhook_consumer.arn
-  handler          = "src.lambdas.webhook_consumer.handler.handler"
-  runtime          = "python3.12"
-  timeout          = 30
-  memory_size      = 256
+  function_name                  = "${local.prefix}-webhook-consumer-${local.env}"
+  role                           = aws_iam_role.webhook_consumer.arn
+  handler                        = "src.lambdas.webhook_consumer.handler.handler"
+  runtime                        = "python3.12"
+  timeout                        = 30
+  memory_size                    = 256
   reserved_concurrent_executions = 5
 
   filename         = var.lambda_package_file
@@ -683,11 +801,11 @@ resource "aws_lambda_function" "webhook_consumer" {
 }
 
 resource "aws_lambda_event_source_mapping" "webhook_sqs" {
-  event_source_arn                   = aws_sqs_queue.webhooks.arn
-  function_name                      = aws_lambda_function.webhook_consumer.arn
-  batch_size                         = 1
-  enabled                            = true
-  function_response_types            = ["ReportBatchItemFailures"]
+  event_source_arn        = aws_sqs_queue.webhooks.arn
+  function_name           = aws_lambda_function.webhook_consumer.arn
+  batch_size              = 1
+  enabled                 = true
+  function_response_types = ["ReportBatchItemFailures"]
 }
 
 # -----------------------------------------------------------------------------
@@ -739,7 +857,7 @@ resource "aws_cloudwatch_metric_alarm" "customers_errors" {
   threshold           = 2
   alarm_description   = "Shopify customers stream runner errors"
   alarm_actions       = [aws_sns_topic.alerts.arn]
-  dimensions = { FunctionName = aws_lambda_function.shopify_customers.function_name }
+  dimensions          = { FunctionName = aws_lambda_function.shopify_customers.function_name }
 }
 
 resource "aws_cloudwatch_metric_alarm" "products_errors" {
@@ -753,7 +871,7 @@ resource "aws_cloudwatch_metric_alarm" "products_errors" {
   threshold           = 2
   alarm_description   = "Shopify products stream runner errors"
   alarm_actions       = [aws_sns_topic.alerts.arn]
-  dimensions = { FunctionName = aws_lambda_function.shopify_products.function_name }
+  dimensions          = { FunctionName = aws_lambda_function.shopify_products.function_name }
 }
 
 resource "aws_cloudwatch_metric_alarm" "inventory_errors" {
@@ -767,7 +885,35 @@ resource "aws_cloudwatch_metric_alarm" "inventory_errors" {
   threshold           = 2
   alarm_description   = "Shopify inventory stream runner errors"
   alarm_actions       = [aws_sns_topic.alerts.arn]
-  dimensions = { FunctionName = aws_lambda_function.shopify_inventory.function_name }
+  dimensions          = { FunctionName = aws_lambda_function.shopify_inventory.function_name }
+}
+
+resource "aws_cloudwatch_metric_alarm" "yotpo_reviews_errors" {
+  alarm_name          = "${local.prefix}-runner-yotpo-reviews-errors-${local.env}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 600
+  statistic           = "Sum"
+  threshold           = 2
+  alarm_description   = "Yotpo reviews stream runner errors"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  dimensions          = { FunctionName = aws_lambda_function.yotpo_reviews.function_name }
+}
+
+resource "aws_cloudwatch_metric_alarm" "yotpo_review_metadata_errors" {
+  alarm_name          = "${local.prefix}-runner-yotpo-review-metadata-errors-${local.env}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 600
+  statistic           = "Sum"
+  threshold           = 2
+  alarm_description   = "Yotpo review metadata stream runner errors"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  dimensions          = { FunctionName = aws_lambda_function.yotpo_review_metadata.function_name }
 }
 
 resource "aws_cloudwatch_metric_alarm" "webhook_consumer_errors" {
@@ -781,7 +927,7 @@ resource "aws_cloudwatch_metric_alarm" "webhook_consumer_errors" {
   threshold           = 2
   alarm_description   = "Webhook consumer Lambda errors"
   alarm_actions       = [aws_sns_topic.alerts.arn]
-  dimensions = { FunctionName = aws_lambda_function.webhook_consumer.function_name }
+  dimensions          = { FunctionName = aws_lambda_function.webhook_consumer.function_name }
 }
 
 resource "aws_cloudwatch_metric_alarm" "webhook_dlq_depth" {
@@ -795,7 +941,7 @@ resource "aws_cloudwatch_metric_alarm" "webhook_dlq_depth" {
   threshold           = 0
   alarm_description   = "Webhook DLQ has messages — failed webhook processing"
   alarm_actions       = [aws_sns_topic.alerts.arn]
-  dimensions = { QueueName = aws_sqs_queue.webhook_dlq.name }
+  dimensions          = { QueueName = aws_sqs_queue.webhook_dlq.name }
 }
 
 # -----------------------------------------------------------------------------
@@ -829,6 +975,11 @@ variable "gorgias_store_id" {
   description = "Gorgias store ID"
   type        = string
   default     = "vitalityextracts"
+}
+
+variable "yotpo_store_id" {
+  description = "Yotpo store/app ID"
+  type        = string
 }
 
 # -----------------------------------------------------------------------------
@@ -865,6 +1016,14 @@ output "shopify_inventory_function" {
 
 output "webhook_consumer_function" {
   value = aws_lambda_function.webhook_consumer.function_name
+}
+
+output "yotpo_reviews_function" {
+  value = aws_lambda_function.yotpo_reviews.function_name
+}
+
+output "yotpo_review_metadata_function" {
+  value = aws_lambda_function.yotpo_review_metadata.function_name
 }
 
 output "webhook_api_url" {
