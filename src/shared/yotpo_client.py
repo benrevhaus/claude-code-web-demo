@@ -1,11 +1,14 @@
-"""Yotpo REST client for polling reviews via the widget endpoint.
+"""Yotpo REST client for polling reviews.
 
-Two-phase fetch strategy:
-  1. bottom_lines endpoint → all product domain_keys (Shopify product IDs)
-  2. Widget endpoint per product → reviews with product context (150/page)
-
-The merchant /v1/apps/ endpoint strips product linkage, images, and verified_buyer.
-The widget /v1/widget/ endpoint returns all of these, scoped per product.
+Two modes:
+  BACKFILL: bottom_lines → product catalog, widget endpoint per product (150/page).
+    Used when no checkpoint exists or checkpoint is a position cursor.
+  INCREMENTAL: merchant endpoint with since_updated_at.
+    Used when checkpoint is a timestamp (backfill completed).
+    Reviews from this endpoint lack domain_key — but for updates to existing
+    reviews, domain_key is already in the database from backfill. New reviews
+    on new products land without domain_key and go to publication exceptions
+    until a periodic product catalog refresh fills them in.
 
 Auth: app_key + secret_key → utoken via /oauth/token.
 """
@@ -14,7 +17,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -67,18 +70,17 @@ def decode_cursor_state(cursor: str | None) -> tuple[str | None, str | None, str
     return payload.get("checkpoint"), payload.get("page_cursor"), payload.get("high_water")
 
 
+def _is_timestamp(value: str | None) -> bool:
+    """Check if a cursor value looks like a timestamp (not a position cursor)."""
+    if not value:
+        return False
+    # Position cursors look like '{"checkpoint":...}' or contain ':'
+    # Timestamps look like '2026-04-07T16:13:32.000Z'
+    return value.startswith("20") and "T" in value
+
+
 class YotpoClient:
-    """Fetch Yotpo reviews via bottom_lines + widget per-product strategy.
-
-    The fetch_page() interface is preserved for compatibility with the
-    stream_runner handler. Internally, the client manages:
-      - A cached product list (domain_keys) fetched from bottom_lines
-      - Per-product page iteration via the widget endpoint
-      - Cursor state encoding: product_index:page_number within high_water
-
-    The handler sees a flat stream of review pages. The client handles
-    the product iteration transparently.
-    """
+    """Fetch Yotpo reviews via backfill (widget) or incremental (merchant) strategy."""
 
     def __init__(self, app_key: str | None = None, secret_key: str | None = None):
         env = os.environ.get("ENV", "dev")
@@ -91,7 +93,6 @@ class YotpoClient:
         self._product_keys: list[str] | None = None
 
     def _get_utoken(self) -> str:
-        """Authenticate with Yotpo and retrieve an access token."""
         if self._utoken:
             return self._utoken
 
@@ -156,16 +157,33 @@ class YotpoClient:
         cursor: str | None,
         page_size: int,
     ) -> YotpoPage:
-        """Fetch one page of reviews, iterating across products transparently.
+        """Fetch one page of reviews.
 
-        Cursor state encodes: product_index:review_page within the product list.
-        The handler calls this repeatedly until has_more=False.
+        Automatically selects backfill or incremental mode:
+          - No cursor or position cursor → backfill via widget endpoint
+          - Timestamp cursor → incremental via merchant endpoint
         """
         del api_version
 
         checkpoint, page_cursor, high_water = decode_cursor_state(cursor)
 
-        # Parse cursor: "product_idx:review_page" or start from beginning
+        # Determine mode: if checkpoint is a timestamp and no position cursor,
+        # we've completed backfill and should use incremental.
+        if _is_timestamp(checkpoint) and not page_cursor:
+            return self._fetch_incremental(checkpoint, page_size)
+        else:
+            return self._fetch_backfill(checkpoint, page_cursor, high_water, page_size)
+
+    # ── Backfill mode: widget endpoint per product ───────────────────────
+
+    def _fetch_backfill(
+        self,
+        checkpoint: str | None,
+        page_cursor: str | None,
+        high_water: str | None,
+        page_size: int,
+    ) -> YotpoPage:
+        # Parse cursor: "product_idx:review_page"
         product_idx = 0
         review_page = 1
         if page_cursor:
@@ -177,11 +195,9 @@ class YotpoClient:
                 product_idx = 0
                 review_page = 1
 
-        # Get product catalog (cached after first call)
         product_keys = self._fetch_all_product_keys()
 
         if not product_keys or product_idx >= len(product_keys):
-            # No products or past the end — done
             return YotpoPage(
                 body={"response": {"reviews": []}},
                 status_code=200,
@@ -194,36 +210,26 @@ class YotpoClient:
         domain_key = product_keys[product_idx]
         per_page = min(page_size, WIDGET_MAX_PER_PAGE)
 
-        # Fetch reviews for this product via widget endpoint
         widget_url = (
             f"{YOTPO_CDN_BASE}/v1/widget/{self._app_key}"
             f"/products/{domain_key}/reviews.json"
             f"?per_page={per_page}&page={review_page}"
         )
-        request = Request(
-            widget_url,
-            headers={"Accept": "application/json"},
-        )
+        request = Request(widget_url, headers={"Accept": "application/json"})
 
         try:
             with urlopen(request, timeout=30) as response:
                 body = json.loads(response.read())
-                headers = response.headers
                 status_code = response.status
         except HTTPError as exc:
             body = self._read_error_body(exc)
             if exc.code == 429:
                 retry_after = int(exc.headers.get("Retry-After", "2"))
                 return YotpoPage(
-                    body=body,
-                    status_code=429,
-                    record_count=0,
-                    next_cursor=encode_cursor_state(
-                        checkpoint, f"{product_idx}:{review_page}", high_water
-                    ),
-                    checkpoint_cursor=high_water or checkpoint,
-                    has_more=True,
-                    rate_limit_remaining=0,
+                    body=body, status_code=429, record_count=0,
+                    next_cursor=encode_cursor_state(checkpoint, f"{product_idx}:{review_page}", high_water),
+                    checkpoint_cursor=encode_cursor_state(checkpoint, f"{product_idx}:{review_page}", high_water),
+                    has_more=True, rate_limit_remaining=0,
                     rate_limit_reset_at=datetime.now(timezone.utc) + timedelta(seconds=retry_after),
                 )
             if exc.code == 401:
@@ -238,58 +244,46 @@ class YotpoClient:
         reviews = response_data.get("reviews", [])
         products = response_data.get("products", [])
 
-        # Inject domain_key and product context into each review
-        # (the widget endpoint puts product info in a separate array, not on each review)
         product_info = products[0] if products else {}
         for review in reviews:
             review["domain_key"] = domain_key
             review["product_yotpo_id"] = product_info.get("id")
             review["product_name"] = product_info.get("name")
-            # Flatten user fields to top level for the raw model
             user = review.get("user", {})
             if user:
                 review.setdefault("name", user.get("display_name"))
                 review.setdefault("reviewer_type", user.get("user_type"))
 
-        # Rebuild body so the raw page model sees reviews with domain_key
         body["response"]["reviews"] = reviews
 
-        # Track timestamps for cursor management
-        created_values = [
-            r.get("created_at") for r in reviews if r.get("created_at")
-        ]
+        # Track timestamps
+        created_values = [r.get("created_at") for r in reviews if r.get("created_at")]
         newest_created = max(created_values, default=None)
         new_high_water = max(
             (v for v in (high_water, newest_created, checkpoint) if v is not None),
             default=None,
         )
 
-        # Determine next cursor: more pages for this product, or move to next product
+        # Determine next cursor
         pagination = response_data.get("pagination", {})
         total_reviews = pagination.get("total", 0)
         fetched_so_far = review_page * per_page
 
         if fetched_so_far < total_reviews:
-            # More pages for this product
             next_page_cursor = f"{product_idx}:{review_page + 1}"
             has_more = True
         elif product_idx + 1 < len(product_keys):
-            # This product done, move to next
             next_page_cursor = f"{product_idx + 1}:1"
             has_more = True
         else:
-            # All products done
             next_page_cursor = None
             has_more = False
 
-        # Always set a durable checkpoint so the handler can save progress.
-        # For mid-backfill runs that hit max_pages, this encodes the current
-        # position (product_index:page) so the next run resumes here.
+        # Checkpoint: always emit progress
         if not has_more:
-            # Completed all products — checkpoint is the high water timestamp
+            # Backfill complete — switch to timestamp checkpoint for incremental mode
             durable_checkpoint = new_high_water
         elif next_page_cursor:
-            # Mid-backfill — checkpoint is the current position
             durable_checkpoint = encode_cursor_state(checkpoint, next_page_cursor, new_high_water)
         else:
             durable_checkpoint = checkpoint
@@ -299,13 +293,200 @@ class YotpoClient:
             next_cursor = encode_cursor_state(checkpoint, next_page_cursor, new_high_water)
 
         return YotpoPage(
+            body=body, status_code=status_code, record_count=len(reviews),
+            next_cursor=next_cursor, checkpoint_cursor=durable_checkpoint,
+            has_more=has_more,
+        )
+
+    # ── Incremental mode: merchant endpoint with since_updated_at ────────
+
+    def _fetch_incremental(self, checkpoint: str, page_size: int) -> YotpoPage:
+        """Fetch reviews updated since checkpoint via the merchant endpoint.
+
+        The merchant endpoint supports since_updated_at but does NOT return
+        domain_key or product linkage. For existing reviews, domain_key is
+        already in the database from backfill. New reviews on new products
+        land without domain_key and go to publication exceptions.
+        """
+        utoken = self._get_utoken()
+
+        query: dict[str, str] = {
+            "count": str(page_size),
+            "page": "1",
+            "since_updated_at": checkpoint,
+        }
+
+        url = f"{YOTPO_API_BASE}/v1/apps/{self._app_key}/reviews?{urlencode(query)}"
+        request = Request(
+            url,
+            headers={"Accept": "application/json", "X-Yotpo-Token": utoken},
+        )
+
+        try:
+            with urlopen(request, timeout=30) as response:
+                body = json.loads(response.read())
+                status_code = response.status
+        except HTTPError as exc:
+            body = self._read_error_body(exc)
+            if exc.code == 429:
+                retry_after = int(exc.headers.get("Retry-After", "5"))
+                return YotpoPage(
+                    body=body, status_code=429, record_count=0,
+                    next_cursor=encode_cursor_state(checkpoint),
+                    checkpoint_cursor=checkpoint,
+                    has_more=True, rate_limit_remaining=0,
+                    rate_limit_reset_at=datetime.now(timezone.utc) + timedelta(seconds=retry_after),
+                )
+            if exc.code == 401:
+                self._utoken = None
+                raise RuntimeError(f"Yotpo auth failed (401): {body}")
+            if 500 <= exc.code < 600:
+                raise
+            raise RuntimeError(f"Yotpo API returned {exc.code}: {body}")
+
+        # Merchant endpoint nests under "response.reviews"
+        response_data = body.get("response", body)
+        reviews = response_data.get("reviews", [])
+
+        # Track timestamps — merchant endpoint has updated_at
+        updated_values = [r.get("updated_at") for r in reviews if r.get("updated_at")]
+        newest_updated = max(updated_values, default=None)
+        new_checkpoint = newest_updated or checkpoint
+
+        # Merchant endpoint uses page-number pagination
+        has_more = len(reviews) >= page_size
+
+        return YotpoPage(
             body=body,
             status_code=status_code,
             record_count=len(reviews),
-            next_cursor=next_cursor,
-            checkpoint_cursor=durable_checkpoint,
+            next_cursor=encode_cursor_state(new_checkpoint) if has_more else None,
+            checkpoint_cursor=new_checkpoint,
             has_more=has_more,
         )
+
+    # ── Product refresh: find new products and backfill their reviews ───
+
+    def find_new_product_keys(self, pg) -> list[str]:
+        """Compare bottom_lines catalog against domain_keys in Postgres.
+        Returns only domain_keys not yet in yotpo.reviews_raw_current.
+        """
+        all_keys = self._fetch_all_product_keys()
+
+        pg._ensure_connection()
+        with pg.connection.cursor() as cur:
+            cur.execute("SELECT DISTINCT domain_key FROM yotpo.reviews_raw_current WHERE domain_key IS NOT NULL")
+            existing = {row[0] for row in cur.fetchall()}
+
+        new_keys = [k for k in all_keys if k not in existing]
+        return new_keys
+
+    def fetch_page_for_products(
+        self,
+        *,
+        product_keys: list[str],
+        cursor: str | None,
+        page_size: int,
+    ) -> YotpoPage:
+        """Backfill reviews for a specific list of products (product refresh mode).
+        Same widget endpoint logic as _fetch_backfill, but with a provided product list.
+        """
+        checkpoint, page_cursor, high_water = decode_cursor_state(cursor)
+
+        product_idx = 0
+        review_page = 1
+        if page_cursor:
+            parts = page_cursor.split(":", 1)
+            try:
+                product_idx = int(parts[0])
+                review_page = int(parts[1]) if len(parts) > 1 else 1
+            except ValueError:
+                product_idx = 0
+                review_page = 1
+
+        if not product_keys or product_idx >= len(product_keys):
+            return YotpoPage(
+                body={"response": {"reviews": []}},
+                status_code=200, record_count=0,
+                next_cursor=None,
+                checkpoint_cursor=high_water or checkpoint,
+                has_more=False,
+            )
+
+        domain_key = product_keys[product_idx]
+        per_page = min(page_size, WIDGET_MAX_PER_PAGE)
+
+        widget_url = (
+            f"{YOTPO_CDN_BASE}/v1/widget/{self._app_key}"
+            f"/products/{domain_key}/reviews.json"
+            f"?per_page={per_page}&page={review_page}"
+        )
+        request = Request(widget_url, headers={"Accept": "application/json"})
+
+        try:
+            with urlopen(request, timeout=30) as response:
+                body = json.loads(response.read())
+                status_code = response.status
+        except HTTPError as exc:
+            body = self._read_error_body(exc)
+            if exc.code == 429:
+                retry_after = int(exc.headers.get("Retry-After", "2"))
+                return YotpoPage(
+                    body=body, status_code=429, record_count=0,
+                    next_cursor=encode_cursor_state(checkpoint, f"{product_idx}:{review_page}", high_water),
+                    checkpoint_cursor=encode_cursor_state(checkpoint, f"{product_idx}:{review_page}", high_water),
+                    has_more=True, rate_limit_remaining=0,
+                    rate_limit_reset_at=datetime.now(timezone.utc) + timedelta(seconds=retry_after),
+                )
+            if exc.code == 401:
+                self._utoken = None
+                raise RuntimeError(f"Yotpo auth failed (401): {body}")
+            if 500 <= exc.code < 600:
+                raise
+            raise RuntimeError(f"Yotpo API returned {exc.code}: {body}")
+
+        response_data = body.get("response", body)
+        reviews = response_data.get("reviews", [])
+        products = response_data.get("products", [])
+
+        product_info = products[0] if products else {}
+        for review in reviews:
+            review["domain_key"] = domain_key
+            review["product_yotpo_id"] = product_info.get("id")
+            review["product_name"] = product_info.get("name")
+            user = review.get("user", {})
+            if user:
+                review.setdefault("name", user.get("display_name"))
+                review.setdefault("reviewer_type", user.get("user_type"))
+
+        body["response"]["reviews"] = reviews
+
+        pagination = response_data.get("pagination", {})
+        total_reviews = pagination.get("total", 0)
+        fetched_so_far = review_page * per_page
+
+        if fetched_so_far < total_reviews:
+            next_page_cursor = f"{product_idx}:{review_page + 1}"
+            has_more = True
+        elif product_idx + 1 < len(product_keys):
+            next_page_cursor = f"{product_idx + 1}:1"
+            has_more = True
+        else:
+            next_page_cursor = None
+            has_more = False
+
+        next_cursor = None
+        if has_more:
+            next_cursor = encode_cursor_state(checkpoint, next_page_cursor, high_water)
+
+        return YotpoPage(
+            body=body, status_code=status_code, record_count=len(reviews),
+            next_cursor=next_cursor,
+            checkpoint_cursor=next_cursor or (high_water or checkpoint),
+            has_more=has_more,
+        )
+
+    # ── Shared helpers ───────────────────────────────────────────────────
 
     @staticmethod
     def _parse_rate_limit(headers) -> tuple[int | None, datetime | None]:

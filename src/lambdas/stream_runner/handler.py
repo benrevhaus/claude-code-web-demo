@@ -78,8 +78,109 @@ def _get_provider_client(source: str, stream: str = "orders"):
     raise ValueError(f"Unsupported source: {source}")
 
 
+def _handle_product_refresh(event: dict) -> dict:
+    """Handle Yotpo product refresh: find new products, backfill their reviews."""
+    source = event["source"]
+    stream = event["stream"]
+    store_id = event["store_id"]
+
+    run_id = str(uuid.uuid4())
+    started_at = datetime.now(timezone.utc)
+
+    log.info("Product refresh starting", run_id=run_id, source=source, store_id=store_id)
+
+    client = _get_provider_client(source, stream)
+    s3 = _get_s3_writer()
+    pg = _get_pg()
+    schema = get_schema(source, stream)
+
+    new_keys = client.find_new_product_keys(pg)
+    log.info("New products found", count=len(new_keys), run_id=run_id)
+
+    if not new_keys:
+        return {
+            "run_id": run_id, "source": source, "stream": stream,
+            "mode": "product_refresh", "status": "success",
+            "new_products": 0, "records_processed": 0,
+            "duration_seconds": round((datetime.now(timezone.utc) - started_at).total_seconds(), 2),
+        }
+
+    processed = 0
+    failed = 0
+    errors: list[str] = []
+    cursor = None
+    page_number = 0
+
+    configs = load_all_stream_configs()
+    config = configs.get(f"{source}#{stream}")
+    max_pages = config.max_pages_per_run if config else 500
+
+    upsert_fn = getattr(pg, schema.pg_upsert_method)
+    history_fn = getattr(pg, schema.pg_history_method)
+
+    for page_number in range(1, max_pages + 1):
+        response = client.fetch_page_for_products(
+            product_keys=new_keys, cursor=cursor, page_size=config.page_size if config else 100,
+        )
+
+        if response.status_code == 429:
+            time.sleep(2.0)
+            continue
+
+        s3_key = s3.build_polling_key(source, stream, store_id, run_id, page_number)
+        s3.write_raw(key=s3_key, payload=response.body, metadata={
+            "source": source, "stream": stream, "run-id": run_id,
+            "mode": "product_refresh", "page": str(page_number),
+        })
+
+        try:
+            page = schema.raw_page_model(**response.body)
+            records = getattr(page, schema.record_list_field, [])
+        except Exception as e:
+            log.error("Page parse failed", error=str(e), page=page_number)
+            errors.append(f"Page {page_number}: {e}")
+            if not response.has_more:
+                break
+            cursor = response.next_cursor
+            continue
+
+        for raw_record in records:
+            try:
+                canonical = schema.transform(raw_record, store_id)
+                updated = upsert_fn(canonical, s3_key, schema.version, run_id)
+                if updated:
+                    history_fn(canonical, run_id)
+                pg.commit()
+                processed += 1
+            except Exception as e:
+                failed += 1
+                errors.append(f"Record {getattr(raw_record, 'id', '?')}: {e}")
+                pg.rollback()
+
+        if not response.has_more:
+            break
+        cursor = response.next_cursor
+
+    duration = round((datetime.now(timezone.utc) - started_at).total_seconds(), 2)
+    result = {
+        "run_id": run_id, "source": source, "stream": stream,
+        "mode": "product_refresh", "status": "success" if failed == 0 else "partial_failure",
+        "new_products": len(new_keys), "records_processed": processed,
+        "records_failed": failed, "pages": page_number,
+        "duration_seconds": duration,
+    }
+    if errors:
+        result["errors"] = errors[:10]
+    log.info("Product refresh complete", **result)
+    return result
+
+
 def handler(event: dict, context=None) -> dict:
-    """Lambda entry point. Event: {source, stream, store_id}."""
+    """Lambda entry point. Event: {source, stream, store_id, mode?}."""
+    # Product refresh mode — daily catalog diff + backfill new products
+    if event.get("mode") == "product_refresh":
+        return _handle_product_refresh(event)
+
     source = event["source"]
     stream = event["stream"]
     store_id = event["store_id"]

@@ -682,6 +682,37 @@ resource "aws_lambda_permission" "yotpo_review_metadata_eventbridge" {
 }
 
 # -----------------------------------------------------------------------------
+# EventBridge — Yotpo daily product refresh (6 AM UTC)
+# -----------------------------------------------------------------------------
+# Uses the same yotpo-reviews Lambda with mode=product_refresh.
+# Fetches product catalog, diffs against existing domain_keys, backfills new products.
+
+resource "aws_cloudwatch_event_rule" "yotpo_product_refresh" {
+  name                = "${local.prefix}-yotpo-product-refresh-${local.env}"
+  schedule_expression = "cron(0 6 * * ? *)"
+  state               = "ENABLED"
+}
+
+resource "aws_cloudwatch_event_target" "yotpo_product_refresh" {
+  rule = aws_cloudwatch_event_rule.yotpo_product_refresh.name
+  arn  = aws_lambda_function.yotpo_reviews.arn
+  input = jsonencode({
+    source   = "yotpo"
+    stream   = "reviews"
+    store_id = var.yotpo_store_id
+    mode     = "product_refresh"
+  })
+}
+
+resource "aws_lambda_permission" "yotpo_product_refresh_eventbridge" {
+  statement_id  = "AllowEventBridgeProductRefresh"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.yotpo_reviews.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.yotpo_product_refresh.arn
+}
+
+# -----------------------------------------------------------------------------
 # SQS — Webhook queue + DLQ
 # -----------------------------------------------------------------------------
 
