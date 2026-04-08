@@ -139,7 +139,12 @@ class YotpoClient:
             for bl in bottomlines:
                 dk = bl.get("domain_key")
                 if dk:
-                    all_keys.append(str(dk))
+                    # Strip Shopify GraphQL GID prefix if present
+                    # e.g., "gid://shopify/Product/8153933825" → "8153933825"
+                    dk = str(dk)
+                    if dk.startswith("gid://"):
+                        dk = dk.rsplit("/", 1)[-1]
+                    all_keys.append(dk)
 
             if len(bottomlines) < per_page:
                 break
