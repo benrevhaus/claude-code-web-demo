@@ -112,6 +112,18 @@ The publication pass triggers automatically via last-writer-wins: once the sourc
 
 This inconsistency window is acceptable while no live downstream consumer depends on the generalized layer. When Customer 360 ships and requires higher availability, the published tables should move to a separate Aurora cluster so that source rollbacks do not touch the published layer. That is the upgrade path — not the current architecture.
 
+### Rollback awareness cascade
+
+A snapshot restore rolls back three layers of timestamps simultaneously, creating a built-in awareness signal that requires no additional code:
+
+1. **Freshness timestamps roll back.** `last_run_at` in `control.stream_cursors` and `ingested_at` on every row revert to the snapshot point. Any downstream consumer checking data freshness sees older dates immediately and knows the data is stale before querying content.
+
+2. **CloudWatch freshness alarms fire.** If the rolled-back `last_run_at` exceeds the configured freshness SLA (e.g., 30 minutes for reviews), the alarm triggers and the operator is notified via SNS. This happens automatically — no manual check needed.
+
+3. **Publication pass rebuilds.** The source streams self-heal within one EventBridge cycle, which updates the cursors and triggers the publication pass. The generalized layer rebuilds from current source state.
+
+The net effect: every layer of the system — downstream consumers, operator alerts, and the publication layer — is informed of the rollback through existing mechanisms. No rollback notification system needs to be built. The timestamps ARE the notification.
+
 ## Assumptions
 
 - The Aurora cluster identifier (`data-streams-prod`) is stable and matches what the handler hardcodes. If the cluster is renamed or replaced, the snapshot call will fail (non-fatally).
