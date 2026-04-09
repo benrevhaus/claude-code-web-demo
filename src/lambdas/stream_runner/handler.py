@@ -692,7 +692,9 @@ def handler(event: dict, context=None) -> dict:
         )
 
     # Detect backfill completion: cursor switched from position to timestamp.
-    # Take an Aurora snapshot at this transition (ADR-043 rebuild stage gate).
+    # Take an Aurora snapshot at this transition (ADR-043/044 rebuild stage gate).
+    # Only Yotpo reviews uses this — Gorgias tickets uses simple incremental
+    # polling without a backfill-to-incremental mode switch (ADR-044).
     if source == "yotpo" and stream == "reviews" and status == "success":
         from src.shared.yotpo_client import _is_timestamp
         was_position = cursor is not None and not _is_timestamp(cursor.split('"checkpoint":')[0] if '"checkpoint":' in str(cursor) else cursor)

@@ -132,7 +132,7 @@ class GorgiasTicketsClient:
         has_more = bool(next_page_cursor) and not crossed_checkpoint
         durable_checkpoint = checkpoint
         if checkpoint is None or crossed_checkpoint or not next_page_cursor:
-            durable_checkpoint = new_high_water
+            durable_checkpoint = new_high_water or checkpoint or "1970-01-01T00:00:00Z"
         next_cursor = None
         if has_more:
             next_cursor = encode_cursor_state(checkpoint, str(next_page_cursor), new_high_water)

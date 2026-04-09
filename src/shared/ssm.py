@@ -14,7 +14,11 @@ _parameter_cache: dict[str, str] = {}
 def _get_ssm_client():
     global _ssm_client
     if _ssm_client is None:
-        _ssm_client = boto3.client("ssm")
+        # Explicit region — SSM parameters are in us-east-1 (ADR-038).
+        # On Lambda, AWS_REGION is set correctly. For local execution,
+        # this ensures the right region even if the CLI default differs.
+        region = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+        _ssm_client = boto3.client("ssm", region_name=region)
     return _ssm_client
 
 
