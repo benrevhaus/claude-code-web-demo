@@ -95,12 +95,21 @@ S3 replay is a valid third recovery path, but it requires re-running the full tr
 
 Aurora snapshots capture the entire cluster — all schemas, all streams. When multiple streams are live, restoring a snapshot to roll back one stream also rolls back every other stream to that point in time.
 
-The operational rule: **only one stream may be in backfill at a time.** Other streams must be in incremental (steady-state) mode during a backfill. If a snapshot restore is needed to roll back the backfilling stream, the incremental streams self-heal on their next EventBridge tick — they read their cursor from `control.stream_cursors` (which was also rolled back) and re-fetch from the vendor API from that earlier cursor position. No data is lost; the incremental streams simply re-process a short window of data they had already ingested.
+The operational rule: **only one stream may be in a rebuild (purge + re-backfill) at a time.** A rebuild requires snapshot restore as a rollback mechanism, and a restore rolls back the entire cluster.
+
+However, **net-new stream backfills may run in parallel** with another stream's backfill. A net-new stream (first-time ingestion, no existing data to protect) has no rollback requirement — if a snapshot restore wipes its progress, it simply restarts from zero with no data loss. The worst case is re-doing the backfill work, which is time, not data integrity.
+
+The distinction:
+- **Rebuild** (purge + re-backfill of existing data): exclusive. A snapshot restore must be able to roll back to the pre-rebuild state without collateral damage to other streams' established data.
+- **Net-new backfill** (first-time ingestion into empty tables): parallel-safe. There is no prior state to protect. A snapshot restore resets the new stream to zero, and it re-backfills on the next EventBridge cycle.
+
+**Incremental (steady-state) streams are always safe** during any backfill. If a snapshot restore rolls back an incremental stream's cursor, it self-heals on the next tick — re-fetches from the earlier cursor position, upserts produce the same result.
 
 This works because:
 - Incremental streams are idempotent (upsert-on-newer)
+- Net-new streams have no prior state — rollback to zero is the same as "not started"
 - Cursors track the last successful position, and re-fetching from an earlier position produces the same result
-- The vendor API is the authority for incremental data, not the database
+- The vendor API is the authority for all data, not the database
 
 This rule does NOT apply after all streams are in steady state. Once all backfills are complete and the stage gate snapshots exist, Aurora's continuous point-in-time restore is sufficient — the restore window is short enough that all streams can self-heal from a few hours of rollback.
 
