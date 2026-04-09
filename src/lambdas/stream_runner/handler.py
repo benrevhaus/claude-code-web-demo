@@ -236,12 +236,16 @@ def _handle_mysql_seed(event: dict) -> dict:
     page_number = 0
 
     # Get IDs already in Postgres to skip them in MySQL query
+    print(f"  Loading existing Postgres IDs...", flush=True)
     pg._ensure_connection()
     with pg.connection.cursor() as cur:
         cur.execute("SELECT id FROM yotpo.reviews_raw_current")
         existing_ids = {row[0] for row in cur.fetchall()}
-    log.info("Existing reviews in Postgres", count=len(existing_ids))
-    print(f"  Existing reviews in Postgres: {len(existing_ids)}", flush=True)
+    # Also load existing metadata IDs to skip
+    with pg.connection.cursor() as cur:
+        cur.execute("SELECT review_id FROM yotpo.review_metadata_current")
+        existing_meta_ids = {row[0] for row in cur.fetchall()}
+    print(f"  Postgres: {len(existing_ids)} reviews, {len(existing_meta_ids)} metadata rows", flush=True)
 
     try:
         with mysql_conn.cursor() as mysql_cur:
@@ -285,24 +289,12 @@ def _handle_mysql_seed(event: dict) -> dict:
         max_id = max(r["id"] for r in rows)
 
         if not new_rows:
-            log.info("All rows in batch already exist", max_id=max_id)
-            print(f"  All rows already exist — advancing cursor to {max_id}", flush=True)
-            pg.save_stream_cursor(
-                source=source, stream="mysql-seed", store_id=store_id,
-                cursor_value=str(max_id), run_id=run_id,
-                status="running", pages=0, records=0,
-            )
-            has_more = len(rows) >= batch_size
-            return {
-                "run_id": run_id, "source": source, "mode": "mysql_seed",
-                "status": "success", "has_more": has_more,
-                "records_processed": 0, "last_id": max_id,
-                "duration_seconds": round((datetime.now(timezone.utc) - started_at).total_seconds(), 2),
-            }
+            print(f"  All reviews already exist — backfilling metadata only", flush=True)
 
         page_number = 1
+        s3_key = ""
 
-        # Build a raw page for S3 storage
+        # Build a raw page for S3 storage (only if there are new reviews)
         raw_records = []
         for row in new_rows:
             # Normalize MySQL row to match YotpoReviewRaw expectations
@@ -337,18 +329,17 @@ def _handle_mysql_seed(event: dict) -> dict:
 
             raw_records.append(record)
 
-        # Write raw batch to S3
-        s3_key = s3.build_polling_key(source, stream, store_id, run_id, page_number)
-        s3.write_raw(key=s3_key, payload={"response": {"reviews": raw_records}}, metadata={
-            "source": source, "stream": stream, "run-id": run_id,
-            "mode": "mysql_seed", "batch_start_id": str(rows[0]["id"]),
-            "batch_end_id": str(rows[-1]["id"]),
-        })
+        # Write raw batch to S3 (only if new reviews)
+        if raw_records:
+            s3_key = s3.build_polling_key(source, stream, store_id, run_id, page_number)
+            s3.write_raw(key=s3_key, payload={"response": {"reviews": raw_records}}, metadata={
+                "source": source, "stream": stream, "run-id": run_id,
+                "mode": "mysql_seed", "batch_start_id": str(new_rows[0]["id"]),
+                "batch_end_id": str(new_rows[-1]["id"]),
+            })
 
-        # Transform and upsert each record — batch commits every 100
-        # Build a lookup for metadata by review ID
-        meta_lookup = {r["id"]: r for r in new_rows}
-        commit_interval = 100
+        # Batch commits — larger interval reduces cross-country round trips
+        commit_interval = 1000
 
         for i, record in enumerate(raw_records):
             try:
@@ -359,25 +350,11 @@ def _handle_mysql_seed(event: dict) -> dict:
                     history_fn(canonical, run_id)
                 processed += 1
 
-                # Upsert metadata if present
-                row_match = meta_lookup.get(record["id"])
-                if row_match and (row_match.get("state") or row_match.get("country")):
-                    meta_raw = metadata_schema.raw_model(
-                        review_id=record["id"],
-                        country=row_match.get("country"),
-                        state=row_match.get("state"),
-                        updated_at=record.get("created_at"),
-                    )
-                    meta_canonical = metadata_schema.transform(meta_raw, store_id)
-                    meta_updated = meta_upsert_fn(meta_canonical, s3_key, metadata_schema.version, run_id)
-                    if meta_updated:
-                        meta_history_fn(meta_canonical, run_id)
-                    metadata_processed += 1
-
-                # Batch commit
                 if (i + 1) % commit_interval == 0:
                     pg.commit()
-                    print(f"  Progress: {i + 1}/{len(raw_records)} records", flush=True)
+                    elapsed = round((datetime.now(timezone.utc) - started_at).total_seconds(), 1)
+                    rate = round((i + 1) / elapsed, 1) if elapsed > 0 else 0
+                    print(f"  Reviews: {i + 1}/{len(raw_records)} | {rate}/sec", flush=True)
 
             except Exception as e:
                 failed += 1
@@ -385,8 +362,56 @@ def _handle_mysql_seed(event: dict) -> dict:
                 log.error("MySQL seed record failed", error=str(e), review_id=record.get("id"))
                 pg.rollback()
 
-        # Final commit
         pg.commit()
+
+        # Upsert metadata for rows in the batch that don't already have it.
+        # This backfills state/country for the full corpus from MySQL.
+        meta_needed = [r for r in rows if r["id"] not in existing_meta_ids and (r.get("state") or r.get("country"))]
+        print(f"  Metadata: {len(meta_needed)} new of {len(rows)} rows", flush=True)
+
+        # Bulk INSERT metadata in chunks — one SQL statement per chunk
+        chunk_size = 1000
+        for chunk_start in range(0, len(meta_needed), chunk_size):
+            chunk = meta_needed[chunk_start:chunk_start + chunk_size]
+            if not chunk:
+                break
+
+            values = []
+            params = []
+            for row in chunk:
+                updated = row["created_at"].isoformat() + "Z" if row.get("created_at") else None
+                values.append("(%s, %s, %s, %s, %s, %s, %s, %s)")
+                params.extend([
+                    row["id"], store_id,
+                    row.get("country"), row.get("country"),
+                    row.get("state"), row.get("state"),
+                    updated, run_id,
+                ])
+
+            sql = f"""
+                INSERT INTO yotpo.review_metadata_current
+                    (review_id, store_id, country, country_code, state, state_code, updated_at, run_id)
+                VALUES {", ".join(values)}
+                ON CONFLICT (review_id, store_id) DO UPDATE SET
+                    country = EXCLUDED.country, country_code = EXCLUDED.country_code,
+                    state = EXCLUDED.state, state_code = EXCLUDED.state_code,
+                    updated_at = EXCLUDED.updated_at, run_id = EXCLUDED.run_id,
+                    ingested_at = NOW()
+            """
+            try:
+                with pg.connection.cursor() as cur:
+                    cur.execute(sql, params)
+                pg.commit()
+                metadata_processed += len(chunk)
+                elapsed = round((datetime.now(timezone.utc) - started_at).total_seconds(), 1)
+                done = chunk_start + len(chunk)
+                rate = round(done / elapsed, 1) if elapsed > 0 else 0
+                print(f"  Metadata: {done}/{len(meta_needed)} | {rate}/sec", flush=True)
+            except Exception as e:
+                log.error("Bulk metadata upsert failed", error=str(e))
+                pg.rollback()
+
+        print(f"  Metadata done: {metadata_processed} upserted", flush=True)
 
     finally:
         mysql_conn.close()

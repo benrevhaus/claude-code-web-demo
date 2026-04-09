@@ -81,23 +81,105 @@ A parallel discovery during this period: the Yotpo metadata API is per-review on
 
 The metadata stream was changed to skip API calls entirely until the MySQL seed populates the baseline. The seed writes both review and metadata data in one pass — the legacy `storereviews_reviews_metadata` table has state and country for every review. After the seed completes, the metadata stream only needs to fetch metadata for genuinely new reviews (a few per hour at steady state).
 
+## Performance Optimizations (applied during first run)
+
+The initial seed implementation was functionally correct but operationally unusable. Three rounds of optimization were required to reach acceptable performance:
+
+### 1. Pre-filter existing IDs in memory
+
+The seed loads all existing review IDs and metadata IDs from Postgres into Python sets before processing each MySQL batch. Rows that already exist are skipped in memory — no Postgres round-trip. This turned 95% of the MySQL rows into instant no-ops.
+
+Without this: every row requires a Postgres upsert round-trip that returns rowcount=0 (no change). At 60ms cross-country latency per call, 200K rows would take days.
+
+### 2. Bulk INSERT for metadata
+
+Individual `INSERT ... ON CONFLICT` statements for metadata were replaced with bulk inserts of 1,000 rows per statement. One SQL round-trip inserts 1,000 rows instead of 1,000 round-trips inserting 1 row each.
+
+Without this: metadata processing ran at ~3 records/second. With bulk inserts: ~1,000 records/second.
+
+### 3. Reviews and metadata in one pass
+
+Each MySQL batch processes both reviews and metadata together. Reviews are filtered against existing IDs (most are skipped). Metadata is filtered against existing metadata IDs and bulk-inserted for every row in the batch — including rows where the review already existed. This backfills metadata for the full corpus, not just new reviews.
+
+Without this: metadata would only be populated for the ~9K gap reviews, leaving 200K reviews without state/country data. The metadata API is per-review only (no bulk endpoint) and would take days to backfill via Lambda.
+
+### 4. Larger batch size with larger commit interval
+
+Batch size increased from 5,000 to 20,000 MySQL rows. Commit interval increased from 100 to 1,000 records. Both reduce the number of Postgres round-trips per batch.
+
+### 5. Progress output with rate and ETA
+
+Every commit prints: records processed, rate per second, estimated time remaining. Without this, the operator had no way to distinguish "working slowly" from "stuck in a loop" during multi-minute batch processing.
+
 ## Final Seed Configuration
 
 - **Execution:** local machine via `scripts/seed-from-mysql.sh`
 - **Tunnel:** SSM port forwarding through EC2 bastion (`127.0.0.1:3308 → RDS:3306`)
-- **Batch size:** 20,000 MySQL rows per round (most skipped in memory)
-- **Commit interval:** every 100 records
-- **Progress output:** every 100 records + batch summary
+- **Batch size:** 20,000 MySQL rows per round
+- **Reviews:** pre-filtered in memory, only new rows upserted individually (commit every 1,000)
+- **Metadata:** pre-filtered in memory, bulk INSERT of 1,000 rows per SQL statement
+- **Progress output:** every 1,000 records with rate/sec and ETA
 - **Cursor:** `control.stream_cursors` with stream name `mysql-seed`, tracks last MySQL ID
-- **Resumption:** automatic — Ctrl+C and re-run picks up from last saved cursor
+- **Resumption:** automatic — Ctrl+C and re-run picks up from last saved cursor. Rounds with all-existing reviews skip to metadata-only mode.
 - **Environment variables required:** `AWS_REGION=us-east-1`, `RAW_BUCKET=data-streams-raw-prod`
+- **Estimated total time:** 15-20 minutes for ~210K MySQL rows (most skipped in memory)
+
+## Golden Path for Future Legacy Seeds
+
+When seeding from a legacy database (Gorgias or any future source), follow this sequence:
+
+1. **Create a column-restricted MySQL/Postgres user** with SELECT only on the fields needed for the mapping. No write access, no access to unrelated tables.
+2. **Store the connection string in SSM** at `/data-streams/{env}/legacy/{source}_connection_string`.
+3. **Establish a tunnel** if the database is behind a private network. SSM port forwarding is preferred over SSH (no key management).
+4. **Pre-load existing IDs into memory** before processing. Do not rely on upsert no-ops for deduplication — the round-trip cost is prohibitive at scale.
+5. **Use bulk INSERT for high-volume tables.** Individual upserts are acceptable only when the new-row count is small (under 1,000).
+6. **Process reviews and metadata in one pass.** Do not separate them into sequential phases — the MySQL query joins them cheaply.
+7. **Print progress with rate and ETA.** Long-running local operations without visible progress cause operators to kill healthy processes.
+8. **Test the tunnel stability.** SSM tunnels can drop during long operations. The seed is resumable by cursor, but a dropped tunnel mid-batch loses that batch's work.
+9. **Reconcile after completion.** Compare counts and checksums between source and target databases to confirm completeness.
+10. **Delete the seed cursor** from `control.stream_cursors` after reconciliation passes — it has no steady-state purpose.
+
+## Reconciliation
+
+After seed completion, run `scripts/reconcile_sample.py` to compare 1,000 random reviews (2-4 months old) between Postgres and MySQL across comparable fields.
+
+### Fields compared
+- `score`, `title`, `votes_up`, `votes_down`, `verified_buyer`, `deleted`, `name`
+
+### Fields NOT compared (expected differences)
+- **`domain_key` / `product_id`:** Postgres stores Shopify product IDs (from widget endpoint). MySQL stores Yotpo internal product IDs. Different ID systems for the same product.
+- **`content`:** MySQL uses `latin1` charset which silently destroys emoji characters. Postgres has correct UTF-8 from the Yotpo API. Postgres data is strictly better.
+
+### Accepted mismatch categories
+
+**Emoji in titles (< 1%):** Same root cause as content — MySQL `latin1` limitation. Postgres has authoritative data.
+
+**`verified_buyer` null vs true (< 1%):** The widget API returns null for some reviews where MySQL's legacy sync defaulted to true. The API is the source of truth.
+
+**Vote count drift (< 0.5%):** Votes change over time. The API backfill and MySQL sync captured counts at different moments. Differences of 1-2 votes are expected and not a data integrity issue.
+
+### First reconciliation result
+
+1,000 random reviews from the 2-4 month window:
+- Found in both databases: 1,000/1,000
+- Perfect match: 987 (98.7%)
+- Mismatches: 13 (all in accepted categories above)
+- Zero unexplained mismatches
+
+### Running the reconciliation
+
+```bash
+# Requires SSM tunnel to MySQL active
+AWS_REGION=us-east-1 AWS_DEFAULT_REGION=us-east-1 .venv/bin/python scripts/reconcile_sample.py
+```
 
 ## Assumptions
 
-- The SSM tunnel remains stable for the duration of the seed (typically 15-30 minutes for the gap fill)
+- The SSM tunnel remains stable for the duration of the seed (typically 15-20 minutes for the full corpus)
 - The legacy MySQL database will remain accessible for the duration of the seed
 - After the seed completes, the `mysql-seed` cursor can be deleted from `control.stream_cursors` — it has no steady-state purpose
 - The metadata stream will begin API-based metadata fetches only after the seed has populated the baseline in `yotpo.review_metadata_current`
+- Future legacy seeds (e.g., Gorgias) follow the same pattern: tunnel + local execution + pre-filter + bulk insert + reconciliation
 
 ## Freshness Marker
 
