@@ -104,6 +104,14 @@ This works because:
 
 This rule does NOT apply after all streams are in steady state. Once all backfills are complete and the stage gate snapshots exist, Aurora's continuous point-in-time restore is sufficient — the restore window is short enough that all streams can self-heal from a few hours of rollback.
 
+### Impact on generalized published tables
+
+A snapshot restore also rolls back the generalized publication tables (`reviews.generalized_reviews_current`, identity links, exceptions, audit). Downstream consumers of the generalized layer see stale data until the publication pass re-runs.
+
+The publication pass triggers automatically via last-writer-wins: once the source streams self-heal and both cursors show success, the next stream_runner invocation fires the publication pass. The generalized layer rebuilds from current source state within one EventBridge cycle (15 minutes worst case).
+
+This inconsistency window is acceptable while no live downstream consumer depends on the generalized layer. When Customer 360 ships and requires higher availability, the published tables should move to a separate Aurora cluster so that source rollbacks do not touch the published layer. That is the upgrade path — not the current architecture.
+
 ## Assumptions
 
 - The Aurora cluster identifier (`data-streams-prod`) is stable and matches what the handler hardcodes. If the cluster is renamed or replaced, the snapshot call will fail (non-fatally).
