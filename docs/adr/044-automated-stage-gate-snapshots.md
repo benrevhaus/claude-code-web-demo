@@ -91,6 +91,19 @@ Snapshots are not free — each takes a few minutes to create and consumes stora
 
 S3 replay is a valid third recovery path, but it requires re-running the full transform and upsert pipeline against every raw payload. For 200K+ reviews, that takes hours. Restoring an Aurora snapshot takes minutes. The snapshots are an optimization for recovery speed, not a replacement for the S3 immutable layer.
 
+## Multi-Stream Constraint
+
+Aurora snapshots capture the entire cluster — all schemas, all streams. When multiple streams are live, restoring a snapshot to roll back one stream also rolls back every other stream to that point in time.
+
+The operational rule: **only one stream may be in backfill at a time.** Other streams must be in incremental (steady-state) mode during a backfill. If a snapshot restore is needed to roll back the backfilling stream, the incremental streams self-heal on their next EventBridge tick — they read their cursor from `control.stream_cursors` (which was also rolled back) and re-fetch from the vendor API from that earlier cursor position. No data is lost; the incremental streams simply re-process a short window of data they had already ingested.
+
+This works because:
+- Incremental streams are idempotent (upsert-on-newer)
+- Cursors track the last successful position, and re-fetching from an earlier position produces the same result
+- The vendor API is the authority for incremental data, not the database
+
+This rule does NOT apply after all streams are in steady state. Once all backfills are complete and the stage gate snapshots exist, Aurora's continuous point-in-time restore is sufficient — the restore window is short enough that all streams can self-heal from a few hours of rollback.
+
 ## Assumptions
 
 - The Aurora cluster identifier (`data-streams-prod`) is stable and matches what the handler hardcodes. If the cluster is renamed or replaced, the snapshot call will fail (non-fatally).
