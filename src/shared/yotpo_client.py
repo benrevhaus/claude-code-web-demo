@@ -467,9 +467,10 @@ class YotpoClient:
                     continue
                 continue
 
-            meta = body.get("response", body).get("metadata", body.get("metadata", {}))
-            if isinstance(meta, dict):
-                customer = meta.get("customer", {})
+            # Response nests under response.payload, not response.metadata
+            payload = body.get("response", body).get("payload", body.get("payload", {}))
+            if isinstance(payload, dict):
+                customer = payload.get("customer", {})
                 record = {
                     "review_id": review_id,
                     "country": customer.get("country"),
@@ -477,6 +478,12 @@ class YotpoClient:
                     "state": customer.get("state"),
                     "state_code": customer.get("state"),
                     "updated_at": datetime.now(timezone.utc).isoformat(),
+                    # PII fields — stored in source-canonical only,
+                    # surfaced to identity companion by publication pass
+                    "_email": customer.get("email"),
+                    "_name": customer.get("name"),
+                    "_address": customer.get("address"),
+                    "_phone": customer.get("phone_number"),
                 }
                 metadata_records.append(record)
 

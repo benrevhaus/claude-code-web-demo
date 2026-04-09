@@ -25,11 +25,12 @@ pg._ensure_connection()
 # Get a random sample of review IDs from ~3 months ago
 with pg.connection.cursor() as cur:
     cur.execute("""
-        SELECT id, domain_key, score, title, LEFT(content, 100) as content_prefix,
-               votes_up, votes_down, verified_buyer, deleted, sentiment,
-               name, created_at::text
-        FROM yotpo.reviews_raw_current
-        WHERE created_at BETWEEN NOW() - INTERVAL '4 months' AND NOW() - INTERVAL '2 months'
+        SELECT r.id, r.domain_key, r.score, r.title, LEFT(r.content, 100) as content_prefix,
+               r.votes_up, r.votes_down, r.verified_buyer, r.deleted, r.sentiment,
+               r.name, r.created_at::text, r.images_data::text
+        FROM yotpo.reviews_raw_current r
+        INNER JOIN yotpo.review_metadata_current m ON r.id = m.review_id AND r.store_id = m.store_id
+        WHERE r.created_at IS NOT NULL
         ORDER BY RANDOM()
         LIMIT %s
     """, (SAMPLE_SIZE,))
@@ -39,7 +40,19 @@ if not pg_rows:
     print("No reviews found in that date range")
     sys.exit(1)
 
+# Get metadata for sampled reviews
+sample_ids = list(pg_rows.keys())
+with pg.connection.cursor() as cur:
+    placeholders_pg = ",".join(["%s"] * len(sample_ids))
+    cur.execute(f"""
+        SELECT review_id, state, country
+        FROM yotpo.review_metadata_current
+        WHERE review_id IN ({placeholders_pg})
+    """, sample_ids)
+    pg_meta = {row[0]: {"state": row[1], "country": row[2]} for row in cur.fetchall()}
+
 print(f"Sampled {len(pg_rows)} reviews from Postgres (2-4 months old)", flush=True)
+print(f"  {len(pg_meta)} have metadata in Postgres", flush=True)
 
 # Connect to MySQL
 print("Connecting to MySQL...", flush=True)
@@ -57,13 +70,24 @@ placeholders = ",".join(["%s"] * len(ids))
 
 with mysql_conn.cursor() as cur:
     cur.execute(f"""
-        SELECT id, product_id, score, title, LEFT(content, 100) as content_prefix,
-               votes_up, votes_down, verified_buyer, deleted, sentiment,
-               display_name, created_at
-        FROM storereviews_reviews
-        WHERE id IN ({placeholders})
+        SELECT r.id, r.product_id, r.score, r.title, LEFT(r.content, 100) as content_prefix,
+               r.votes_up, r.votes_down, r.verified_buyer, r.deleted, r.sentiment,
+               r.display_name, r.created_at,
+               m.state as meta_state, m.country as meta_country
+        FROM storereviews_reviews r
+        LEFT JOIN storereviews_reviews_metadata m ON r.id = m.review_id
+        WHERE r.id IN ({placeholders})
     """, ids)
     mysql_rows = {row["id"]: row for row in cur.fetchall()}
+
+    # Get image counts per review from the images table
+    cur.execute(f"""
+        SELECT review_id, COUNT(*) as image_count
+        FROM storereviews_reviews_images
+        WHERE review_id IN ({placeholders})
+        GROUP BY review_id
+    """, ids)
+    mysql_image_counts = {row["review_id"]: row["image_count"] for row in cur.fetchall()}
 
 mysql_conn.close()
 
@@ -81,7 +105,15 @@ for review_id, pg_row in pg_rows.items():
         continue
 
     my = mysql_rows[review_id]
-    pg_id, pg_dk, pg_score, pg_title, pg_content, pg_vup, pg_vdown, pg_vb, pg_del, pg_sent, pg_name, pg_created = pg_row
+    pg_id, pg_dk, pg_score, pg_title, pg_content, pg_vup, pg_vdown, pg_vb, pg_del, pg_sent, pg_name, pg_created, pg_images_json = pg_row
+
+    # Count images in Postgres
+    try:
+        pg_images = json.loads(pg_images_json) if pg_images_json else []
+    except (json.JSONDecodeError, TypeError):
+        pg_images = []
+    pg_image_count = len(pg_images) if isinstance(pg_images, list) else 0
+    my_image_count = mysql_image_counts.get(review_id, 0)
 
     # Note: domain_key is NOT compared — Postgres stores Shopify product ID
     # (from widget endpoint), MySQL stores Yotpo internal product ID.
@@ -96,6 +128,21 @@ for review_id, pg_row in pg_rows.items():
         ("deleted", pg_del, bool(my["deleted"])),
         ("name", (pg_name or "").strip(), (my["display_name"] or "").strip()),
     ]
+
+    # Image count comparison
+    if pg_image_count > 0 or my_image_count > 0:
+        checks.append(("image_count", pg_image_count, my_image_count))
+
+    # Metadata comparison (if both sides have it)
+    pg_m = pg_meta.get(review_id, {})
+    my_state = (my.get("meta_state") or "").strip()
+    my_country = (my.get("meta_country") or "").strip()
+    pg_state = (pg_m.get("state") or "").strip()
+    pg_country = (pg_m.get("country") or "").strip()
+
+    if my_state or my_country or pg_state or pg_country:
+        checks.append(("meta_state", pg_state, my_state))
+        checks.append(("meta_country", pg_country, my_country))
 
     row_ok = True
     for field, pg_val, my_val in checks:
