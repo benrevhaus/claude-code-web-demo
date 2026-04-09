@@ -235,6 +235,14 @@ def _handle_mysql_seed(event: dict) -> dict:
     max_id = last_id
     page_number = 0
 
+    # Get IDs already in Postgres to skip them in MySQL query
+    pg._ensure_connection()
+    with pg.connection.cursor() as cur:
+        cur.execute("SELECT id FROM yotpo.reviews_raw_current")
+        existing_ids = {row[0] for row in cur.fetchall()}
+    log.info("Existing reviews in Postgres", count=len(existing_ids))
+    print(f"  Existing reviews in Postgres: {len(existing_ids)}", flush=True)
+
     try:
         with mysql_conn.cursor() as mysql_cur:
             # Fetch reviews in batches by ID
@@ -258,8 +266,14 @@ def _handle_mysql_seed(event: dict) -> dict:
             )
             rows = mysql_cur.fetchall()
 
+        # Filter out rows already in Postgres
+        new_rows = [r for r in rows if r["id"] not in existing_ids]
+        log.info("Batch fetched", total=len(rows), new=len(new_rows), skipped=len(rows) - len(new_rows))
+        print(f"  MySQL batch: {len(rows)} fetched, {len(new_rows)} new, {len(rows) - len(new_rows)} skipped", flush=True)
+
         if not rows:
             log.info("MySQL seed complete — no more rows", last_id=last_id)
+            print("  No more rows in MySQL — seed complete", flush=True)
             return {
                 "run_id": run_id, "source": source, "mode": "mysql_seed",
                 "status": "complete", "records_processed": 0,
@@ -267,11 +281,30 @@ def _handle_mysql_seed(event: dict) -> dict:
                 "duration_seconds": round((datetime.now(timezone.utc) - started_at).total_seconds(), 2),
             }
 
+        # Track max_id from ALL rows (including skipped) for cursor advancement
+        max_id = max(r["id"] for r in rows)
+
+        if not new_rows:
+            log.info("All rows in batch already exist", max_id=max_id)
+            print(f"  All rows already exist — advancing cursor to {max_id}", flush=True)
+            pg.save_stream_cursor(
+                source=source, stream="mysql-seed", store_id=store_id,
+                cursor_value=str(max_id), run_id=run_id,
+                status="running", pages=0, records=0,
+            )
+            has_more = len(rows) >= batch_size
+            return {
+                "run_id": run_id, "source": source, "mode": "mysql_seed",
+                "status": "success", "has_more": has_more,
+                "records_processed": 0, "last_id": max_id,
+                "duration_seconds": round((datetime.now(timezone.utc) - started_at).total_seconds(), 2),
+            }
+
         page_number = 1
 
         # Build a raw page for S3 storage
         raw_records = []
-        for row in rows:
+        for row in new_rows:
             # Normalize MySQL row to match YotpoReviewRaw expectations
             record = {
                 "id": row["id"],
@@ -312,19 +345,22 @@ def _handle_mysql_seed(event: dict) -> dict:
             "batch_end_id": str(rows[-1]["id"]),
         })
 
-        # Transform and upsert each record
-        for record in raw_records:
+        # Transform and upsert each record — batch commits every 100
+        # Build a lookup for metadata by review ID
+        meta_lookup = {r["id"]: r for r in new_rows}
+        commit_interval = 100
+
+        for i, record in enumerate(raw_records):
             try:
                 raw = schema.raw_model(**record)
                 canonical = schema.transform(raw, store_id)
                 updated = upsert_fn(canonical, s3_key, schema.version, run_id)
                 if updated:
                     history_fn(canonical, run_id)
-                pg.commit()
                 processed += 1
 
                 # Upsert metadata if present
-                row_match = next((r for r in rows if r["id"] == record["id"]), None)
+                row_match = meta_lookup.get(record["id"])
                 if row_match and (row_match.get("state") or row_match.get("country")):
                     meta_raw = metadata_schema.raw_model(
                         review_id=record["id"],
@@ -336,16 +372,21 @@ def _handle_mysql_seed(event: dict) -> dict:
                     meta_updated = meta_upsert_fn(meta_canonical, s3_key, metadata_schema.version, run_id)
                     if meta_updated:
                         meta_history_fn(meta_canonical, run_id)
-                    pg.commit()
                     metadata_processed += 1
 
-                max_id = max(max_id, record["id"])
+                # Batch commit
+                if (i + 1) % commit_interval == 0:
+                    pg.commit()
+                    print(f"  Progress: {i + 1}/{len(raw_records)} records", flush=True)
 
             except Exception as e:
                 failed += 1
                 errors.append(f"Review {record.get('id', '?')}: {e}")
                 log.error("MySQL seed record failed", error=str(e), review_id=record.get("id"))
                 pg.rollback()
+
+        # Final commit
+        pg.commit()
 
     finally:
         mysql_conn.close()
