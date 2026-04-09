@@ -304,6 +304,12 @@ resource "aws_iam_role_policy" "stream_runner" {
         Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:*"
       },
+      {
+        Sid      = "RDSSnapshot"
+        Effect   = "Allow"
+        Action   = ["rds:CreateDBClusterSnapshot"]
+        Resource = aws_rds_cluster.main.arn
+      },
     ]
   })
 }

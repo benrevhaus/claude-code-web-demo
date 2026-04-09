@@ -466,6 +466,22 @@ def _handle_mysql_seed(event: dict) -> dict:
     }
     if errors:
         result["errors"] = errors[:10]
+    # Take Aurora snapshot when seed completes (ADR-043 stage gate)
+    if not has_more and status != "error":
+        try:
+            import boto3
+            rds = boto3.client("rds")
+            snapshot_id = f"yotpo-seed-complete-{run_id[:8]}"
+            rds.create_db_cluster_snapshot(
+                DBClusterIdentifier="data-streams-prod",
+                DBClusterSnapshotIdentifier=snapshot_id,
+            )
+            log.info("Seed complete — Aurora snapshot created", snapshot_id=snapshot_id)
+            print(f"  Aurora snapshot: {snapshot_id}", flush=True)
+        except Exception as snap_err:
+            log.warning("Aurora snapshot failed (non-fatal)", error=str(snap_err))
+            print(f"  Aurora snapshot failed (non-fatal): {snap_err}", flush=True)
+
     log.info("MySQL seed batch complete", **result)
     return result
 
@@ -674,6 +690,25 @@ def handler(event: dict, context=None) -> dict:
             pages=page_number,
             records=processed,
         )
+
+    # Detect backfill completion: cursor switched from position to timestamp.
+    # Take an Aurora snapshot at this transition (ADR-043 rebuild stage gate).
+    if source == "yotpo" and stream == "reviews" and status == "success":
+        from src.shared.yotpo_client import _is_timestamp
+        was_position = cursor is not None and not _is_timestamp(cursor.split('"checkpoint":')[0] if '"checkpoint":' in str(cursor) else cursor)
+        is_now_timestamp = last_checkpoint is not None and _is_timestamp(last_checkpoint)
+        if was_position and is_now_timestamp:
+            try:
+                import boto3
+                rds = boto3.client("rds")
+                snapshot_id = f"yotpo-backfill-complete-{run_id[:8]}"
+                rds.create_db_cluster_snapshot(
+                    DBClusterIdentifier="data-streams-prod",
+                    DBClusterSnapshotIdentifier=snapshot_id,
+                )
+                log.info("Backfill complete — Aurora snapshot created", snapshot_id=snapshot_id)
+            except Exception as snap_err:
+                log.warning("Aurora snapshot failed (non-fatal)", error=str(snap_err))
 
     # Yotpo publication: last-writer-wins (ADR-034)
     if source == "yotpo" and status in ("success", "partial_failure"):
