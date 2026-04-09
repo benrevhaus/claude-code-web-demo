@@ -162,13 +162,16 @@ class YotpoClient:
         cursor: str | None,
         page_size: int,
     ) -> YotpoPage:
-        """Fetch one page of reviews.
+        """Fetch one page of reviews or metadata.
 
-        Automatically selects backfill or incremental mode:
-          - No cursor or position cursor → backfill via widget endpoint
-          - Timestamp cursor → incremental via merchant endpoint
+        Routes by endpoint:
+          - "reviews" → backfill (widget) or incremental (merchant)
+          - "review-metadata" → per-review metadata for reviews missing it
         """
         del api_version
+
+        if endpoint == "review-metadata":
+            return self._fetch_metadata(store_id, cursor, page_size)
 
         checkpoint, page_cursor, high_water = decode_cursor_state(cursor)
 
@@ -367,6 +370,125 @@ class YotpoClient:
             record_count=len(reviews),
             next_cursor=encode_cursor_state(new_checkpoint) if has_more else None,
             checkpoint_cursor=new_checkpoint,
+            has_more=has_more,
+        )
+
+    # ── Metadata mode: per-review metadata for reviews missing it ─────
+
+    def _fetch_metadata(self, store_id: str, cursor: str | None, page_size: int) -> YotpoPage:
+        """Fetch metadata for reviews that don't have it yet.
+
+        Queries Postgres for review IDs in yotpo.reviews_raw_current that
+        have no corresponding row in yotpo.review_metadata_current, then
+        fetches metadata per-review from the Yotpo API. Returns a page of
+        metadata records in the format the raw page model expects.
+
+        At steady state, only new reviews (a few per run) need metadata.
+        The historical bulk is seeded from MySQL (ADR-041).
+        """
+        from src.shared.pg_client import PgClient
+
+        utoken = self._get_utoken()
+
+        # Parse cursor: last processed review ID offset
+        offset = 0
+        if cursor:
+            try:
+                offset = int(cursor)
+            except (ValueError, TypeError):
+                offset = 0
+
+        # Find reviews missing metadata, but only those ingested AFTER the
+        # metadata baseline was seeded. Historical metadata comes from MySQL
+        # (ADR-041), not the per-review API. The baseline marker is the
+        # existence of ANY metadata rows — if none exist, the seed hasn't
+        # run yet and we skip until it does.
+        pg = PgClient.from_env()
+        pg._ensure_connection()
+        with pg.connection.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM yotpo.review_metadata_current WHERE store_id = %s",
+                (store_id,),
+            )
+            metadata_count = cur.fetchone()[0]
+
+            if metadata_count == 0:
+                # No metadata baseline yet — skip until MySQL seed runs (ADR-041)
+                return YotpoPage(
+                    body={"response": {"metadata": []}},
+                    status_code=200, record_count=0,
+                    next_cursor=None,
+                    checkpoint_cursor=str(offset),
+                    has_more=False,
+                )
+
+            # Find reviews newer than the latest metadata, missing metadata
+            cur.execute(
+                """
+                SELECT r.id
+                FROM yotpo.reviews_raw_current r
+                LEFT JOIN yotpo.review_metadata_current m
+                    ON r.id = m.review_id AND r.store_id = m.store_id
+                WHERE r.store_id = %s AND m.review_id IS NULL
+                    AND r.ingested_at > (SELECT MAX(ingested_at) FROM yotpo.review_metadata_current WHERE store_id = %s)
+                ORDER BY r.id
+                LIMIT %s OFFSET %s
+                """,
+                (store_id, store_id, page_size, offset),
+            )
+            review_ids = [row[0] for row in cur.fetchall()]
+
+        if not review_ids:
+            return YotpoPage(
+                body={"response": {"metadata": []}},
+                status_code=200, record_count=0,
+                next_cursor=None,
+                checkpoint_cursor=str(offset),
+                has_more=False,
+            )
+
+        # Fetch metadata per review
+        metadata_records = []
+        for review_id in review_ids:
+            url = f"{YOTPO_API_BASE}/v1/apps/{self._app_key}/reviews/{review_id}/metadata?utoken={utoken}"
+            request = Request(url, headers={"Accept": "application/json"})
+
+            try:
+                with urlopen(request, timeout=15) as response:
+                    body = json.loads(response.read())
+            except HTTPError as exc:
+                if exc.code == 429:
+                    # Stop here, resume from this offset next run
+                    break
+                if exc.code == 404:
+                    # Review has no metadata in Yotpo — skip
+                    continue
+                if 500 <= exc.code < 600:
+                    continue
+                continue
+
+            meta = body.get("response", body).get("metadata", body.get("metadata", {}))
+            if isinstance(meta, dict):
+                customer = meta.get("customer", {})
+                record = {
+                    "review_id": review_id,
+                    "country": customer.get("country"),
+                    "country_code": customer.get("country"),
+                    "state": customer.get("state"),
+                    "state_code": customer.get("state"),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+                metadata_records.append(record)
+
+        new_offset = offset + len(review_ids)
+        has_more = len(review_ids) >= page_size
+
+        return YotpoPage(
+            body={"response": {"metadata": metadata_records}},
+            status_code=200,
+            record_count=len(metadata_records),
+            next_cursor=str(new_offset) if has_more else None,
+            checkpoint_cursor=str(new_offset),
             has_more=has_more,
         )
 

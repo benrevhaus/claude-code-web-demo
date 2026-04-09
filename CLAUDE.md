@@ -189,6 +189,98 @@ The dashboard reads from `analytics.*` Postgres tables only. It does not read so
 
 ---
 
+## Operational scripts
+
+All scripts are in `scripts/`. All AWS commands target `us-east-1` (ADR-038).
+
+### Deploy code to Lambda
+
+```bash
+# All functions:
+bash scripts/deploy-lambda.sh
+
+# Single function:
+bash scripts/deploy-lambda.sh data-streams-runner-yotpo-reviews-prod
+```
+
+### Invoke streams manually
+
+```bash
+# Yotpo reviews:
+bash scripts/invoke-yotpo.sh
+
+# Yotpo review metadata:
+bash scripts/invoke-yotpo.sh review-metadata
+
+# Any other Lambda (Shopify, Gorgias):
+aws lambda invoke --region us-east-1 --function-name data-streams-runner-gorgias-tickets-prod \
+  --cli-binary-format raw-in-base64-out --cli-read-timeout 900 \
+  --payload '{"source":"gorgias","stream":"tickets","store_id":"YOUR_STORE_ID"}' /tmp/result.json && cat /tmp/result.json
+```
+
+### Connect to prod database
+
+```bash
+# Interactive:
+bash scripts/psql-prod.sh
+
+# Single query:
+bash scripts/psql-prod.sh -c "SELECT COUNT(*) FROM yotpo.reviews_raw_current;"
+```
+
+### Full deploy + invoke + verify cycle (Yotpo)
+
+```bash
+bash scripts/deploy-yotpo.sh
+```
+
+### Check backfill progress
+
+```bash
+bash scripts/psql-prod.sh -c "
+  SELECT source, stream, cursor_value, last_status, records_total, last_run_at
+  FROM control.stream_cursors ORDER BY source, stream;"
+```
+
+### Check review corpus health
+
+```bash
+bash scripts/psql-prod.sh -c "
+  SELECT COUNT(*) as reviews, COUNT(DISTINCT domain_key) as products,
+  COUNT(*) FILTER (WHERE domain_key IS NULL) as missing_dk,
+  ROUND(AVG(score)::numeric, 2) as avg_score
+  FROM yotpo.reviews_raw_current;"
+```
+
+### Check review gap vs Yotpo API
+
+```bash
+.venv/bin/python scripts/check_review_caps.py
+```
+
+### Terraform (infrastructure changes)
+
+```bash
+cd infra/environments/prod-mvp
+# Requires terraform.tfvars with yotpo_store_id, shopify_store_id, db_master_password
+terraform plan -lock=false
+terraform apply -lock=false
+```
+
+### Set SSM secrets (always include --region us-east-1)
+
+```bash
+aws ssm put-parameter --region us-east-1 --name /data-streams/prod/VENDOR/KEY --type SecureString --value "VALUE" --overwrite
+```
+
+### Check CloudWatch logs
+
+```bash
+aws logs tail --region us-east-1 /aws/lambda/data-streams-runner-yotpo-reviews-prod --since 60m --no-cli-pager
+```
+
+---
+
 ## Rebuild instructions
 If this repository is lost or needs to be recreated:
 1. Re-read this `CLAUDE.md` + all docs in `docs/`
@@ -214,6 +306,7 @@ If this repository is lost or needs to be recreated:
 - 0.38.0 — Added the analytics contract spec, superseded ADR-030 with ADR-031, and re-framed the dashboard as a read-only internal suite surface inside `data-streams` bound by documented analytical contracts.
 - 0.39.0 — Renamed the in-repo analytical surface to Data Streams Explorer across app copy and core docs, positioning GA4 as the first stream view inside a broader internal suite surface.
 - 0.40.0 — Added a true Data Streams Explorer home view with stream selection, making GA4 a navigable stream module instead of the default root screen.
+- 0.64.0 — Added MySQL seed mode (ADR-041): stream_runner handles mode=mysql_seed to backfill reviews + metadata from legacy MySQL. Reads storereviews_reviews + users + metadata with column-restricted user, writes raw to S3, transforms through standard pipeline, upserts to Postgres. Cursor tracks last MySQL ID for resumption across invocations. Also added pymysql dependency, fixed metadata stream to skip until MySQL seed populates baseline, added operational commands to CLAUDE.md.
 - 0.63.0 — Fixed GID-prefixed domain_keys from bottom_lines (gid://shopify/Product/X → X). Backfill complete: 203,421 reviews across 744 products, cursor switched to incremental mode. Remaining 8,787 review gap (4.1%) is the 10K widget cap — fillable from MySQL per ADR-041.
 - 0.62.0 — Added ADR-041: legacy MySQL seed plan for review gap fill. Documents source schema (shopify_api.storereviews_reviews + users + metadata + images + videos), 1:1 field mapping to data-streams canonical model, extraction SQL, and execution plan. Deferred until widget backfill completes and gaps are confirmed.
 - 0.61.0 — Yotpo backfill-to-incremental switchover: client auto-detects mode from cursor (timestamp → merchant endpoint with since_updated_at, position → widget endpoint per product). Added daily product refresh (6 AM UTC cron) that diffs bottom_lines catalog against existing domain_keys and backfills only new products. Same Lambda, different EventBridge payload with mode=product_refresh. New reviews on new products are ingested within 24 hours.

@@ -22,8 +22,8 @@ cursor_field: updated_at
 cursor_type: datetime
 
 freshness_sla_minutes: 120
-max_pages_per_run: 500
-page_size: 100
+max_pages_per_run: 1
+page_size: 500
 rate_limit_bucket: yotpo
 
 owner: platform

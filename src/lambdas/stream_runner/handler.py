@@ -175,8 +175,212 @@ def _handle_product_refresh(event: dict) -> dict:
     return result
 
 
+def _handle_mysql_seed(event: dict) -> dict:
+    """Seed reviews + metadata from legacy MySQL to fill gaps (ADR-041).
+
+    Reads from storereviews_reviews + users + metadata in MySQL,
+    writes raw to S3, transforms via standard pipeline, upserts to Postgres.
+    Cursor tracks last MySQL review ID processed — resumes across invocations.
+    """
+    import pymysql
+
+    source = event["source"]
+    stream = event["stream"]
+    store_id = event["store_id"]
+    batch_size = event.get("batch_size", 2000)
+
+    run_id = str(uuid.uuid4())
+    started_at = datetime.now(timezone.utc)
+
+    log.info("MySQL seed starting", run_id=run_id, source=source, store_id=store_id)
+
+    s3 = _get_s3_writer()
+    pg = _get_pg()
+    schema = get_schema(source, stream)
+    metadata_schema = get_schema(source, "review-metadata")
+
+    upsert_fn = getattr(pg, schema.pg_upsert_method)
+    history_fn = getattr(pg, schema.pg_history_method)
+    meta_upsert_fn = getattr(pg, metadata_schema.pg_upsert_method)
+    meta_history_fn = getattr(pg, metadata_schema.pg_history_method)
+
+    # Read cursor: last MySQL review ID processed
+    cursor_value = pg.get_stream_cursor(source, "mysql-seed", store_id)
+    last_id = int(cursor_value) if cursor_value else 0
+
+    # Connect to legacy MySQL
+    env = os.environ.get("ENV", "dev")
+    prefix = os.environ.get("PARAM_PREFIX", "data-streams")
+    from src.shared.ssm import get_env_or_ssm
+    mysql_dsn = get_env_or_ssm("LEGACY_MYSQL_CONNECTION_STRING", f"/{prefix}/{env}/legacy/mysql_connection_string")
+
+    # Parse pymysql connection from DSN
+    # Format: mysql+pymysql://user:pass@host:port/db
+    from urllib.parse import urlparse
+    parsed = urlparse(mysql_dsn.replace("mysql+pymysql://", "mysql://"))
+    mysql_conn = pymysql.connect(
+        host=parsed.hostname,
+        port=parsed.port or 3306,
+        user=parsed.username,
+        password=parsed.password,
+        database=parsed.path.lstrip("/"),
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
+    )
+
+    processed = 0
+    metadata_processed = 0
+    failed = 0
+    errors: list[str] = []
+    max_id = last_id
+    page_number = 0
+
+    try:
+        with mysql_conn.cursor() as mysql_cur:
+            # Fetch reviews in batches by ID
+            mysql_cur.execute(
+                """
+                SELECT
+                    r.id, r.product_id AS domain_key, r.score, r.content, r.title,
+                    r.display_name AS name, r.sentiment, r.votes_up, r.votes_down,
+                    r.verified_buyer, r.deleted, r.source_review_id, r.images_data,
+                    r.user_type AS reviewer_type, r.created_at,
+                    u.email,
+                    m.state, m.country
+                FROM storereviews_reviews r
+                LEFT JOIN storereviews_reviews_users u ON r.id = u.review_id
+                LEFT JOIN storereviews_reviews_metadata m ON r.id = m.review_id
+                WHERE r.id > %s
+                ORDER BY r.id ASC
+                LIMIT %s
+                """,
+                (last_id, batch_size),
+            )
+            rows = mysql_cur.fetchall()
+
+        if not rows:
+            log.info("MySQL seed complete — no more rows", last_id=last_id)
+            return {
+                "run_id": run_id, "source": source, "mode": "mysql_seed",
+                "status": "complete", "records_processed": 0,
+                "last_id": last_id,
+                "duration_seconds": round((datetime.now(timezone.utc) - started_at).total_seconds(), 2),
+            }
+
+        page_number = 1
+
+        # Build a raw page for S3 storage
+        raw_records = []
+        for row in rows:
+            # Normalize MySQL row to match YotpoReviewRaw expectations
+            record = {
+                "id": row["id"],
+                "domain_key": str(row["domain_key"]) if row["domain_key"] else None,
+                "score": row["score"],
+                "content": row["content"],
+                "title": row["title"],
+                "name": row["name"],
+                "sentiment": float(row["sentiment"]) if row["sentiment"] else None,
+                "votes_up": row["votes_up"],
+                "votes_down": row["votes_down"],
+                "verified_buyer": bool(row["verified_buyer"]),
+                "deleted": bool(row["deleted"]),
+                "source_review_id": row["source_review_id"],
+                "reviewer_type": row["reviewer_type"],
+                "email": row["email"],
+                "created_at": row["created_at"].isoformat() + "Z" if row["created_at"] else None,
+                "is_incentivized": False,
+                "images_data": [],
+                "product_yotpo_id": None,
+                "product_name": None,
+            }
+            # Parse images_data JSON from MySQL varchar
+            if row.get("images_data"):
+                try:
+                    import json as _json
+                    record["images_data"] = _json.loads(row["images_data"])
+                except (ValueError, TypeError):
+                    record["images_data"] = []
+
+            raw_records.append(record)
+
+        # Write raw batch to S3
+        s3_key = s3.build_polling_key(source, stream, store_id, run_id, page_number)
+        s3.write_raw(key=s3_key, payload={"response": {"reviews": raw_records}}, metadata={
+            "source": source, "stream": stream, "run-id": run_id,
+            "mode": "mysql_seed", "batch_start_id": str(rows[0]["id"]),
+            "batch_end_id": str(rows[-1]["id"]),
+        })
+
+        # Transform and upsert each record
+        for record in raw_records:
+            try:
+                raw = schema.raw_model(**record)
+                canonical = schema.transform(raw, store_id)
+                updated = upsert_fn(canonical, s3_key, schema.version, run_id)
+                if updated:
+                    history_fn(canonical, run_id)
+                pg.commit()
+                processed += 1
+
+                # Upsert metadata if present
+                row_match = next((r for r in rows if r["id"] == record["id"]), None)
+                if row_match and (row_match.get("state") or row_match.get("country")):
+                    meta_raw = metadata_schema.raw_model(
+                        review_id=record["id"],
+                        country=row_match.get("country"),
+                        state=row_match.get("state"),
+                        updated_at=record.get("created_at"),
+                    )
+                    meta_canonical = metadata_schema.transform(meta_raw, store_id)
+                    meta_updated = meta_upsert_fn(meta_canonical, s3_key, metadata_schema.version, run_id)
+                    if meta_updated:
+                        meta_history_fn(meta_canonical, run_id)
+                    pg.commit()
+                    metadata_processed += 1
+
+                max_id = max(max_id, record["id"])
+
+            except Exception as e:
+                failed += 1
+                errors.append(f"Review {record.get('id', '?')}: {e}")
+                log.error("MySQL seed record failed", error=str(e), review_id=record.get("id"))
+                pg.rollback()
+
+    finally:
+        mysql_conn.close()
+
+    # Save cursor — last MySQL ID processed
+    has_more = len(rows) >= batch_size
+    status = "success" if failed == 0 else "partial_failure"
+
+    pg.save_stream_cursor(
+        source=source, stream="mysql-seed", store_id=store_id,
+        cursor_value=str(max_id), run_id=run_id,
+        status="running" if has_more else status,
+        pages=page_number, records=processed,
+    )
+
+    duration = round((datetime.now(timezone.utc) - started_at).total_seconds(), 2)
+    result = {
+        "run_id": run_id, "source": source, "mode": "mysql_seed",
+        "status": status, "has_more": has_more,
+        "records_processed": processed, "metadata_processed": metadata_processed,
+        "records_failed": failed, "last_id": max_id,
+        "duration_seconds": duration,
+    }
+    if errors:
+        result["errors"] = errors[:10]
+    log.info("MySQL seed batch complete", **result)
+    return result
+
+
 def handler(event: dict, context=None) -> dict:
     """Lambda entry point. Event: {source, stream, store_id, mode?}."""
+    # MySQL seed mode — backfill from legacy database (ADR-041)
+    if event.get("mode") == "mysql_seed":
+        return _handle_mysql_seed(event)
+
     # Product refresh mode — daily catalog diff + backfill new products
     if event.get("mode") == "product_refresh":
         return _handle_product_refresh(event)
