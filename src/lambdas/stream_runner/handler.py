@@ -247,6 +247,16 @@ def _handle_mysql_seed(event: dict) -> dict:
         existing_meta_ids = {row[0] for row in cur.fetchall()}
     print(f"  Postgres: {len(existing_ids)} reviews, {len(existing_meta_ids)} metadata rows", flush=True)
 
+    # Build Yotpo internal ID → Shopify ID mapping from MySQL storereviews_products.
+    # MySQL reviews store Yotpo internal product IDs; we need Shopify product IDs.
+    print(f"  Loading product ID mapping from MySQL...", flush=True)
+    with mysql_conn.cursor() as mysql_cur:
+        mysql_cur.execute("SELECT id, product_id FROM storereviews_products WHERE product_id > 0")
+        yotpo_to_shopify = {str(row["id"]): str(row["product_id"]) for row in mysql_cur.fetchall()}
+        mysql_cur.execute("SELECT id FROM storereviews_products WHERE product_id = 0")
+        site_review_product_ids = {str(row["id"]) for row in mysql_cur.fetchall()}
+    print(f"  Product mapping: {len(yotpo_to_shopify)} entries, {len(site_review_product_ids)} site review IDs to skip", flush=True)
+
     try:
         with mysql_conn.cursor() as mysql_cur:
             # Fetch reviews in batches by ID
@@ -270,10 +280,25 @@ def _handle_mysql_seed(event: dict) -> dict:
             )
             rows = mysql_cur.fetchall()
 
-        # Filter out rows already in Postgres
-        new_rows = [r for r in rows if r["id"] not in existing_ids]
-        log.info("Batch fetched", total=len(rows), new=len(new_rows), skipped=len(rows) - len(new_rows))
-        print(f"  MySQL batch: {len(rows)} fetched, {len(new_rows)} new, {len(rows) - len(new_rows)} skipped", flush=True)
+        # Filter out site reviews and rows with unmappable product IDs
+        mappable_rows = []
+        unmappable_count = 0
+        site_review_count = 0
+        for r in rows:
+            mysql_pid = str(r["domain_key"]) if r["domain_key"] else None
+            if not mysql_pid:
+                unmappable_count += 1
+                continue
+            if mysql_pid in site_review_product_ids:
+                site_review_count += 1
+                continue
+            if mysql_pid not in yotpo_to_shopify and len(mysql_pid) <= 8:
+                unmappable_count += 1
+                continue
+            mappable_rows.append(r)
+        new_rows = [r for r in mappable_rows if r["id"] not in existing_ids]
+        log.info("Batch fetched", total=len(rows), new=len(new_rows), skipped=len(rows) - len(new_rows) - unmappable_count, unmappable=unmappable_count)
+        print(f"  MySQL batch: {len(rows)} fetched, {len(new_rows)} new, {site_review_count} site, {unmappable_count} unmappable, {len(mappable_rows) - len(new_rows)} existing", flush=True)
 
         if not rows:
             log.info("MySQL seed complete — no more rows", last_id=last_id)
@@ -298,9 +323,13 @@ def _handle_mysql_seed(event: dict) -> dict:
         raw_records = []
         for row in new_rows:
             # Normalize MySQL row to match YotpoReviewRaw expectations
+            # Map MySQL product_id (Yotpo internal) to Shopify domain_key
+            mysql_product_id = str(row["domain_key"]) if row["domain_key"] else None
+            shopify_dk = yotpo_to_shopify.get(mysql_product_id, mysql_product_id)
+
             record = {
                 "id": row["id"],
-                "domain_key": str(row["domain_key"]) if row["domain_key"] else None,
+                "domain_key": shopify_dk,
                 "score": row["score"],
                 "content": row["content"],
                 "title": row["title"],
@@ -366,8 +395,8 @@ def _handle_mysql_seed(event: dict) -> dict:
 
         # Upsert metadata for rows in the batch that don't already have it.
         # This backfills state/country for the full corpus from MySQL.
-        meta_needed = [r for r in rows if r["id"] not in existing_meta_ids and (r.get("state") or r.get("country"))]
-        print(f"  Metadata: {len(meta_needed)} new of {len(rows)} rows", flush=True)
+        meta_needed = [r for r in mappable_rows if r["id"] not in existing_meta_ids and (r.get("state") or r.get("country"))]
+        print(f"  Metadata: {len(meta_needed)} new of {len(mappable_rows)} mappable rows", flush=True)
 
         # Bulk INSERT metadata in chunks — one SQL statement per chunk
         chunk_size = 1000

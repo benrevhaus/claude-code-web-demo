@@ -258,6 +258,33 @@ bash scripts/psql-prod.sh -c "
 .venv/bin/python scripts/check_review_caps.py
 ```
 
+### Legacy MySQL seed (one-time backfill, ADR-041/042)
+
+```bash
+# Requires SSM tunnel to MySQL active (port 3308)
+# Requires: AWS_REGION, RAW_BUCKET env vars
+AWS_REGION=us-east-1 RAW_BUCKET=data-streams-raw-prod bash scripts/seed-from-mysql.sh
+```
+
+Processes reviews + metadata from legacy MySQL in batches of 20K. Pre-filters existing IDs in memory, bulk-inserts metadata. Cursor-resumable — Ctrl+C and re-run picks up where it left off.
+
+### Reconcile Postgres vs MySQL (1000 random reviews)
+
+```bash
+# Requires SSM tunnel to MySQL active
+AWS_REGION=us-east-1 AWS_DEFAULT_REGION=us-east-1 .venv/bin/python scripts/reconcile_sample.py
+```
+
+Compares score, title, votes, verified_buyer, deleted, name, image count, state, and country. Excludes domain_key (different ID systems) and content (MySQL latin1 loses emoji). 98.7% match rate expected.
+
+### Check metadata from new system (not MySQL seed)
+
+```bash
+AWS_REGION=us-east-1 AWS_DEFAULT_REGION=us-east-1 .venv/bin/python scripts/test_new_metadata.py
+```
+
+Shows reviews created in last 3 days, how many have metadata, and samples of recent metadata with ingestion timestamps. Verifies the metadata Lambda is working for new reviews after the MySQL seed baseline.
+
 ### Terraform (infrastructure changes)
 
 ```bash
@@ -306,6 +333,7 @@ If this repository is lost or needs to be recreated:
 - 0.38.0 — Added the analytics contract spec, superseded ADR-030 with ADR-031, and re-framed the dashboard as a read-only internal suite surface inside `data-streams` bound by documented analytical contracts.
 - 0.39.0 — Renamed the in-repo analytical surface to Data Streams Explorer across app copy and core docs, positioning GA4 as the first stream view inside a broader internal suite surface.
 - 0.40.0 — Added a true Data Streams Explorer home view with stream selection, making GA4 a navigable stream module instead of the default root screen.
+- 0.69.0 — ADR-043: stream rebuild from scratch. Full purge and rehydrate procedure after Yotpo data became impure (MySQL seed overwrote API domain_keys with Yotpo internal IDs). Documents authority hierarchy (vendor API first, legacy DB gap fill only), 5-phase rebuild sequence, when to rebuild vs repair, TRUNCATE lock handling, and the principle that Postgres is the most disposable layer. MySQL seed now filters site reviews (product_id=0), skips unmappable IDs, and uses storereviews_products for Yotpo→Shopify mapping.
 - 0.68.0 — Fixed metadata API parse path (response.payload.customer, not response.metadata.customer). Validated 5/5 match between Yotpo API metadata and MySQL metadata. No bad data entered the system — the metadata Lambda timed out before the bug could produce empty values. PII fields (email, name, address, phone) captured from metadata API response for identity companion.
 - 0.67.0 — Yotpo stream declared golden. Added reconciliation script (scripts/reconcile_sample.py) comparing 1000 random reviews between Postgres and MySQL: 98.7% perfect match, remaining 1.3% explained by MySQL latin1 emoji loss, API vote drift, and null handling. Postgres data is strictly better than MySQL for emoji content. Updated ADR-042 with reconciliation methodology, accepted mismatch categories, and first results.
 - 0.66.0 — Updated ADR-042 with performance optimizations and golden path for future seeds: pre-filter existing IDs in memory, bulk INSERT metadata (1000 rows/statement), reviews + metadata in one pass, progress output with rate/ETA, 20K batch size. Documented 10-step golden path for Gorgias and future legacy seeds.
