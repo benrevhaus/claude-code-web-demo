@@ -96,6 +96,24 @@ Rejected because there is no dev environment (ADR-023). The prod environment is 
 - The Shopify webhook consumer was built months before this deployment. It has never been tested against real webhook traffic because the infrastructure didn't exist until this week. The routing Lambda (ADR-037) was built during this deployment to work around an API Gateway limitation. Neither component has been battle-tested.
 - The operator's instinct — "let it backfill and run for a few days" — directly reflects the experience from Yotpo (ADR-043: "default to rebuild when uncertain, prove stability before adding complexity") and Gorgias (ADR-050: five failures during first deployment, three of which were caused by unproven code paths).
 
+## Shopify App Setup Notes
+
+### read_all_orders scope required for historical backfill
+
+New Shopify custom apps created via the 2026 Dev Dashboard default to `read_orders`, which only grants access to the last 60 days of orders. Full order history requires the `read_all_orders` scope. This scope may require justification to Shopify during app review.
+
+Without this scope, the orders backfill appears to work but only ingests recent data. The date range in the database is the diagnostic: if the oldest order is within 60 days, the scope is missing.
+
+If denied: the MySQL legacy seed (ADR-041/042) provides the historical backfill path.
+
+### GraphQL API version 2026-04 breaking changes
+
+The 2026-04 API changed `refunds` and `transactions` on orders from connection types (with `edges/node`) to direct arrays. The `totalRefundedSet` field name is unchanged on the Refund object despite web documentation suggesting otherwise. Always verify field names against the specific object's schema page, not summaries.
+
+### Decimal serialization
+
+Shopify's GraphQL responses produce `Decimal` values in Pydantic models. Every `json.dumps` call that serializes model data must include `default=str` or the upsert fails with `Object of type Decimal is not JSON serializable`. This affects every stream, not just Shopify — it was a latent bug in all `json.dumps` calls in `pg_client.py`.
+
 ## Freshness Marker
 
 - **Captured:** 2026-04-10
