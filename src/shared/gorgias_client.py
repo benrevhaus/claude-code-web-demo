@@ -87,6 +87,7 @@ class GorgiasTicketsClient:
             headers={
                 "Accept": "application/json",
                 "Authorization": self._basic_auth_header(),
+                "User-Agent": "data-streams/1.0",
             },
             method="GET",
         )

@@ -395,7 +395,7 @@ def _handle_mysql_seed(event: dict) -> dict:
 
         # Upsert metadata for rows in the batch that don't already have it.
         # This backfills state/country for the full corpus from MySQL.
-        meta_needed = [r for r in mappable_rows if r["id"] not in existing_meta_ids and (r.get("state") or r.get("country"))]
+        meta_needed = [r for r in mappable_rows if r["id"] not in existing_meta_ids and (r.get("state") not in (None, "") or r.get("country") not in (None, ""))]
         print(f"  Metadata: {len(meta_needed)} new of {len(mappable_rows)} mappable rows", flush=True)
 
         # Bulk INSERT metadata in chunks — one SQL statement per chunk
