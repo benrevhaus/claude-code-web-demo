@@ -6,6 +6,7 @@ These documents capture **intent**, not just implementation. Every decision reco
 
 ## How to use these docs
 
+- **First ADR step:** Open [`adr/MANIFEST.md`](/Users/codehaus/projects/data-streams/docs/adr/MANIFEST.md). Scan the corpus there before opening individual ADRs.
 - **Before building a new stream:** Read ADR-021 (Single-Lambda MVP), ADR-006 (Config Over Code), and `specs/stream-spec.md`.
 - **Before adding infrastructure:** Read ADR-023 (Single Prod Environment) and ADR-009 (Terraform Governance).
 - **Before adding a review source:** Read ADR-033 (Source-Pure Reviews), ADR-035 (PII Boundaries), and `specs/review-stream-implementation-guide.md`.
@@ -19,6 +20,8 @@ These documents capture **intent**, not just implementation. Every decision reco
 ### Architecture Decision Records (ADRs)
 
 Numbered, immutable once accepted. If a decision is superseded, a new ADR replaces it with a back-reference.
+
+Start with [`adr/MANIFEST.md`](/Users/codehaus/projects/data-streams/docs/adr/MANIFEST.md) for the compact dependency-aware index. Use the table below when you need the full file list.
 
 | ADR | Title | Status |
 |-----|-------|--------|
