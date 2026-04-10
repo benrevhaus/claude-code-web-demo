@@ -6,7 +6,7 @@ stream: products
 display_name: Shopify Products
 
 mode: graphql
-api_version: "2024-01"
+api_version: "2026-04"
 
 schedule: rate(30 minutes)
 backfill_enabled: false

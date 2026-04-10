@@ -6,7 +6,7 @@ stream: orders
 display_name: Shopify Orders
 
 mode: graphql+webhook
-api_version: "2024-01"
+api_version: "2026-04"
 
 schedule: rate(5 minutes)
 backfill_enabled: false

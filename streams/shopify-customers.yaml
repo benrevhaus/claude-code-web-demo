@@ -6,7 +6,7 @@ stream: customers
 display_name: Shopify Customers
 
 mode: graphql+webhook
-api_version: "2024-01"
+api_version: "2026-04"
 
 schedule: rate(15 minutes)
 backfill_enabled: false

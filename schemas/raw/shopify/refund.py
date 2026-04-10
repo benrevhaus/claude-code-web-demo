@@ -55,8 +55,8 @@ class ShopifyRefundRaw(BaseModel):
         n = dict(data)
         n["id"] = _gid_to_int(n.get("id")) or n.get("id")
         n["created_at"] = n.get("created_at") or n.get("createdAt")
-        # totalRefundedSet
-        total_set = n.get("totalRefundedSet") or {}
+        # totalRefundedSet (pre-2026) or totalSet (2026+)
+        total_set = n.get("totalRefundedSet") or n.get("totalSet") or {}
         shop_money = total_set.get("shopMoney") or {}
         if n.get("total_refunded") is None:
             n["total_refunded"] = shop_money.get("amount")

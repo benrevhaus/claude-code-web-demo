@@ -88,31 +88,27 @@ query FetchOrders($first: Int!, $after: String, $query: String) {
           }
         }
         refunds(first: 10) {
-          edges {
-            node {
-              id
-              createdAt
-              note
-              totalRefundedSet {
-                shopMoney {
-                  amount
-                  currencyCode
+          id
+          createdAt
+          note
+          totalRefundedSet {
+            shopMoney {
+              amount
+              currencyCode
+            }
+          }
+          refundLineItems(first: 50) {
+            edges {
+              node {
+                quantity
+                lineItem {
+                  id
+                  name
+                  sku
                 }
-              }
-              refundLineItems(first: 50) {
-                edges {
-                  node {
-                    quantity
-                    lineItem {
-                      id
-                      name
-                      sku
-                    }
-                    subtotalSet {
-                      shopMoney {
-                        amount
-                      }
-                    }
+                subtotalSet {
+                  shopMoney {
+                    amount
                   }
                 }
               }
@@ -120,23 +116,19 @@ query FetchOrders($first: Int!, $after: String, $query: String) {
           }
         }
         transactions(first: 50) {
-          edges {
-            node {
-              id
-              kind
-              status
-              amountSet {
-                shopMoney {
-                  amount
-                  currencyCode
-                }
-              }
-              gateway
-              createdAt
-              parentTransaction {
-                id
-              }
+          id
+          kind
+          status
+          amountSet {
+            shopMoney {
+              amount
+              currencyCode
             }
+          }
+          gateway
+          createdAt
+          parentTransaction {
+            id
           }
         }
       }

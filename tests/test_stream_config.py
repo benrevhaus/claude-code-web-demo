@@ -11,7 +11,7 @@ class TestStreamConfigParsing:
         assert config.source == "shopify"
         assert config.stream == "orders"
         assert config.mode == StreamMode.GRAPHQL_WEBHOOK
-        assert config.api_version == "2024-01"
+        assert config.api_version == "2026-04"
         assert config.schedule == "rate(5 minutes)"
         assert config.schema_version == "shopify.order.v3"
         assert config.idempotency_key == ["order_id", "updated_at"]
