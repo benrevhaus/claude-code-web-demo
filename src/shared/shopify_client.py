@@ -347,17 +347,78 @@ def decode_cursor_state(cursor: str | None) -> tuple[str | None, str | None]:
 
 
 class ShopifyGraphQLClient:
-    """Generic Shopify GraphQL Admin API client — works for any resource type."""
+    """Generic Shopify GraphQL Admin API client — works for any resource type.
+
+    Authentication: supports two modes.
+      1. Client credentials (2026 standard): client_id + client_secret → 24h rotating token
+      2. Legacy static token: shpat_ access token (backward compatible)
+
+    The client auto-detects which mode to use based on which SSM parameters exist.
+    If client_id + client_secret are set, it uses client credentials with auto-refresh.
+    If only access_token is set, it uses the static token (legacy).
+    """
 
     def __init__(self, stream: str = "orders", access_token: str | None = None):
         env = os.environ.get("ENV", "dev")
         prefix = os.environ.get("PARAM_PREFIX", "data-streams")
-        access_token_param = f"/{prefix}/{env}/shopify/access_token"
-        self._access_token = access_token or get_env_or_ssm("SHOPIFY_ACCESS_TOKEN", access_token_param)
+
+        self._client_id: str | None = None
+        self._client_secret: str | None = None
+        self._access_token: str | None = access_token
+        self._token_expires_at: datetime | None = None
+
+        if not access_token:
+            # Try client credentials first (2026 standard)
+            try:
+                self._client_id = get_env_or_ssm(
+                    "SHOPIFY_CLIENT_ID", f"/{prefix}/{env}/shopify/client_id"
+                )
+                self._client_secret = get_env_or_ssm(
+                    "SHOPIFY_CLIENT_SECRET", f"/{prefix}/{env}/shopify/client_secret"
+                )
+            except Exception:
+                # Fall back to legacy static token
+                access_token_param = f"/{prefix}/{env}/shopify/access_token"
+                self._access_token = get_env_or_ssm("SHOPIFY_ACCESS_TOKEN", access_token_param)
 
         if stream not in STREAM_QUERIES:
             raise ValueError(f"Unknown Shopify stream: {stream}. Available: {list(STREAM_QUERIES)}")
         self._query, self._root_key = STREAM_QUERIES[stream]
+
+    def _get_access_token(self, store_domain: str) -> str:
+        """Get a valid access token, refreshing via client credentials if needed."""
+        # If using legacy static token, return it directly
+        if self._client_id is None:
+            return self._access_token
+
+        # If we have a valid token that hasn't expired, reuse it
+        # Refresh 5 minutes before expiry to avoid edge cases
+        if self._access_token and self._token_expires_at:
+            if datetime.now(timezone.utc) < self._token_expires_at - timedelta(minutes=5):
+                return self._access_token
+
+        # Exchange client credentials for a new token
+        payload = (
+            f"grant_type=client_credentials"
+            f"&client_id={self._client_id}"
+            f"&client_secret={self._client_secret}"
+        )
+        request = Request(
+            f"https://{store_domain}/admin/oauth/access_token",
+            data=payload.encode("utf-8"),
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "User-Agent": "data-streams/1.0",
+            },
+            method="POST",
+        )
+        with urlopen(request, timeout=15) as response:
+            body = json.loads(response.read())
+            self._access_token = body["access_token"]
+            expires_in = body.get("expires_in", 86399)
+            self._token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+
+        return self._access_token
 
     def fetch_page(
         self,
@@ -373,6 +434,7 @@ class ShopifyGraphQLClient:
         checkpoint, page_cursor = decode_cursor_state(cursor)
         domain = store_id if "." in store_id else f"{store_id}.myshopify.com"
         query_filter = f"updated_at:>={checkpoint}" if checkpoint else None
+        access_token = self._get_access_token(domain)
 
         payload = {
             "query": self._query,
@@ -388,7 +450,8 @@ class ShopifyGraphQLClient:
             headers={
                 "Accept": "application/json",
                 "Content-Type": "application/json",
-                "X-Shopify-Access-Token": self._access_token,
+                "X-Shopify-Access-Token": access_token,
+                "User-Agent": "data-streams/1.0",
             },
             method="POST",
         )
