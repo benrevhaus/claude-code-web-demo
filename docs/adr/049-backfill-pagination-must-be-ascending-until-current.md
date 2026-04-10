@@ -143,6 +143,16 @@ Every polling client must sort by the vendor's **last-modified** field (typicall
 - The Yotpo client avoided this bug by accident: its product-by-product iteration doesn't use time-ordered pagination. But the Yotpo cursor had its own bug (ADR-040) with the same root cause: cursor behavior that works for small datasets but fails at scale.
 - The pattern is: **every cursor and pagination strategy must be tested against a corpus larger than max_pages_per_run.** Small-dataset testing will not catch pagination gaps.
 
+## Debug Rule: Check Vendor Docs Before Assuming API Capabilities
+
+During the Gorgias cursor fix, a date-range filter (`updated_datetime:gte`) was added without checking whether the Gorgias API supported it. The API returned 400 — the parameter doesn't exist. The Gorgias API uses cursor-based pagination only, with no date-range filtering.
+
+The correct fix was to persist the API's pagination cursor (`meta.next_cursor`) across runs so the next invocation resumes where the previous one stopped. This was discoverable from the [Gorgias pagination docs](https://developers.gorgias.com/reference/pagination) in 30 seconds.
+
+**The rule:** when a cursor isn't advancing between runs, check the vendor's pagination documentation before writing any code fix. Do not assume date-range filtering, offset-based pagination, or any other pagination capability exists — verify against the vendor docs first.
+
+This is the same lesson as ADR-045 (test with curl before debugging auth) applied to pagination: **verify the API's actual capabilities before coding against assumed capabilities.**
+
 ## Freshness Marker
 
 - **Captured:** 2026-04-10

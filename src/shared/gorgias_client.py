@@ -142,14 +142,25 @@ class GorgiasTicketsClient:
             value is not None for value in (high_water, newest_updated, checkpoint)
         ) else None
 
-        crossed_checkpoint = bool(checkpoint and oldest_updated and oldest_updated <= checkpoint)
+        # In descending mode (incremental), stop when we reach data we've already seen.
+        # In ascending mode (backfill), never stop early — keep going until no more pages.
+        if backfill_complete:
+            # Descending: stop when oldest item on page is at or before checkpoint
+            crossed_checkpoint = bool(checkpoint and oldest_updated and oldest_updated <= checkpoint)
+        else:
+            # Ascending: never stop early, always continue to next page
+            crossed_checkpoint = False
+
         has_more = bool(next_page_cursor) and not crossed_checkpoint
-        durable_checkpoint = checkpoint
-        if checkpoint is None or crossed_checkpoint or not next_page_cursor:
-            durable_checkpoint = new_high_water or checkpoint or "1970-01-01T00:00:00Z"
         next_cursor = None
         if has_more:
             next_cursor = encode_cursor_state(checkpoint, str(next_page_cursor), new_high_water)
+            # Persist full state including API cursor so the next run can resume.
+            # Without this, the API cursor is lost between runs and pagination restarts.
+            durable_checkpoint = encode_cursor_state(checkpoint, str(next_page_cursor), new_high_water)
+        else:
+            # No more pages — checkpoint is the high water timestamp for incremental mode
+            durable_checkpoint = new_high_water or checkpoint or "1970-01-01T00:00:00Z"
 
         rate_remaining, reset_at = self._parse_rate_limit(headers)
 

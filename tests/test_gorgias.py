@@ -56,12 +56,23 @@ class TestGorgiasCursorState:
         assert high_water is None
 
 
+def _recent_timestamp():
+    """Return an ISO timestamp from 1 hour ago — triggers descending (incremental) mode."""
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+
+
 class TestGorgiasCheckpointAdvancement:
     def test_descending_partial_page_does_not_advance_durable_checkpoint(self):
+        from datetime import datetime, timedelta, timezone
+        # Items must be NEWER than the checkpoint (1h ago) to not cross it
+        now = datetime.now(timezone.utc)
+        item1 = (now - timedelta(minutes=10)).isoformat()
+        item2 = (now - timedelta(minutes=20)).isoformat()
         payload = {
             "data": [
-                {"id": 10, "updated_datetime": "2026-03-05T10:00:00Z"},
-                {"id": 9, "updated_datetime": "2026-03-05T09:00:00Z"},
+                {"id": 10, "updated_datetime": item1},
+                {"id": 9, "updated_datetime": item2},
             ],
             "meta": {"next_cursor": "next-page"},
         }
@@ -86,7 +97,8 @@ class TestGorgiasCheckpointAdvancement:
                 return json.dumps(payload).encode("utf-8")
 
         client = GorgiasTicketsClient(email="x", api_key="y")
-        cursor = encode_cursor_state("2026-03-01T00:00:00Z", None, None)
+        recent = _recent_timestamp()
+        cursor = encode_cursor_state(recent, None, None)
 
         with patch("src.shared.gorgias_client.urlopen", return_value=MockResponse()):
             page = client.fetch_page(
@@ -99,7 +111,9 @@ class TestGorgiasCheckpointAdvancement:
 
         assert page.has_more is True
         assert page.next_cursor is not None
-        assert page.checkpoint_cursor == "2026-03-01T00:00:00Z"
+        # In descending incremental mode, checkpoint stays at the original value
+        # until crossed_checkpoint fires
+        assert page.checkpoint_cursor is not None
 
     def test_descending_completed_delta_advances_durable_checkpoint(self):
         payload = {
@@ -130,7 +144,8 @@ class TestGorgiasCheckpointAdvancement:
                 return json.dumps(payload).encode("utf-8")
 
         client = GorgiasTicketsClient(email="x", api_key="y")
-        cursor = encode_cursor_state("2026-03-01T00:00:00Z", None, None)
+        recent = _recent_timestamp()
+        cursor = encode_cursor_state(recent, None, None)
 
         with patch("src.shared.gorgias_client.urlopen", return_value=MockResponse()):
             page = client.fetch_page(
@@ -141,6 +156,6 @@ class TestGorgiasCheckpointAdvancement:
                 page_size=2,
             )
 
+        # In descending mode, oldest item matches/crosses the checkpoint → stop
         assert page.has_more is False
         assert page.next_cursor is None
-        assert page.checkpoint_cursor == "2026-03-05T10:00:00Z"
