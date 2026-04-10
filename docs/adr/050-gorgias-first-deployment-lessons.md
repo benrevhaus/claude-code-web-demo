@@ -107,7 +107,22 @@ The ADR corpus reduced Gorgias deployment failures by catching 3 of 8 potential 
 7. **Persist the full cursor state** including API pagination tokens, not just timestamps
 8. **Disable EventBridge** before any destructive table operation
 
+## Business Impact
+
+The Gorgias data stream had a direct, measurable business impact beyond its technical function.
+
+During a CEO-level meeting with Gorgias, the existence of this data stream — the fact that the company was actively building a provider-agnostic ingestion layer for its Gorgias data — changed the vendor's posture. The vendor:
+
+- Offered to pilot new programs that had not previously been on the table
+- Offered to push unused credits from the current contract to the next renewal period
+
+Both are significant leverage wins. The data stream demonstrated that the company had the technical capability to own its data independently of the vendor — which is precisely the architectural goal documented in ADR-033 (source-pure streams with generalized publication).
+
+The implication: building data sovereignty infrastructure doesn't just protect against vendor lock-in technically — it changes the negotiating dynamic with the vendor. A vendor that knows you can walk away offers better terms than one that assumes you can't.
+
+This validates the decision (ADR-033) to build generalized publication in phase 1 rather than deferring it. The generalized layer wasn't needed yet technically, but its existence — and the vendor's awareness of it — created immediate business value.
+
 ## Freshness Marker
 
 - **Captured:** 2026-04-10
-- **Stale when:** the platform adds a pre-deployment validation script that automates the audit steps, or the Gorgias API changes its pagination model, or a future stream deployment discovers a failure category not documented here or in ADRs 037-049.
+- **Stale when:** the platform adds a pre-deployment validation script that automates the audit steps, or the Gorgias API changes its pagination model, or a future stream deployment discovers a failure category not documented here or in ADRs 037-049, or the Gorgias vendor relationship materially changes.
