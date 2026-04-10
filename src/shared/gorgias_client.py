@@ -75,7 +75,20 @@ class GorgiasTicketsClient:
 
         checkpoint, page_cursor, high_water = decode_cursor_state(cursor)
         domain = store_id if "." in store_id else f"{store_id}.gorgias.com"
-        order_by = "updated_datetime:asc" if checkpoint is None else "updated_datetime:desc"
+
+        # Stay ascending during backfill until the checkpoint is near current time.
+        # Only switch to descending (incremental) once the checkpoint is within 24h.
+        # This prevents a gap between ascending and descending pagination.
+        backfill_complete = False
+        if checkpoint:
+            try:
+                checkpoint_dt = datetime.fromisoformat(checkpoint.replace("Z", "+00:00"))
+                age_hours = (datetime.now(timezone.utc) - checkpoint_dt).total_seconds() / 3600
+                backfill_complete = age_hours < 24
+            except (ValueError, TypeError):
+                backfill_complete = False
+
+        order_by = "updated_datetime:desc" if backfill_complete else "updated_datetime:asc"
 
         query = [("limit", str(page_size)), ("order_by", order_by)]
         if page_cursor:
