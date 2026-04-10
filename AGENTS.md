@@ -2,6 +2,14 @@
 
 Instructions for AI agents working on this codebase.
 
+## Before you do anything
+
+**Read ADR-048 first.** ADRs are the primary artifact of this platform — the code is secondary. Before making any architectural decision, search the existing ADRs (`docs/adr/`) for prior decisions on the same topic. The Why-Not sections document rejected alternatives with reasoning. Do not re-explore a path that was already evaluated and rejected.
+
+**After every non-trivial decision or deployment failure**, write an ADR following the YY Method (https://yymethod.com). Required sections: Decision, Intent, Constraints, Why, Why-Not (Rejected Alternatives), Assumptions, Tribal Context, Freshness Marker. The operational ADRs (037-047) that document failures and debugging playbooks are as valuable as the architectural ADRs (001-036). Do not skip them.
+
+**The ADR corpus is the handoff mechanism.** A new agent reading `docs/adr/` should be able to extend the platform without the original operator present. If you make a decision that a future agent would need to understand, it belongs in an ADR.
+
 ## Environment rules
 
 - **Single environment: prod only (ADR-023).** There is no dev environment. All Terraform, SSM paths, and deployments target `prod`.

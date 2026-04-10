@@ -11,6 +11,8 @@ This repository is a **scuttleable prototype**.
 Optimize for fast iteration, clarity, and rebuildability. Avoid overengineering.
 If uncertain, choose the simplest approach that still works end-to-end.
 
+**ADRs are the product, not the code (ADR-048).** The code can be regenerated from the ADR corpus. The ADRs cannot be regenerated from the code. Every non-trivial decision, failure, and operational scar is recorded as an ADR following the YY Method. Before making any architectural decision, read the existing ADRs — the answer may already be there. Before diverging from an established pattern, check the Why-Not sections — the alternative may have been evaluated and rejected with documented reasoning. After every significant decision or deployment failure, write an ADR preserving the reasoning chain.
+
 ---
 
 ## What this is
