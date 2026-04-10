@@ -20,7 +20,7 @@ class GorgiasTicketV1(BaseModel):
     last_message_datetime: Optional[datetime] = None
     last_received_message_datetime: Optional[datetime] = None
     spam: Optional[bool] = None
-    via: Optional[dict[str, Any]] = None
+    via: Optional[Any] = None  # Can be dict or string (e.g., "zendesk")
     customer: Optional[dict[str, Any]] = None
     assignee_user: Optional[dict[str, Any]] = None
     tags: Optional[list[str]] = None
