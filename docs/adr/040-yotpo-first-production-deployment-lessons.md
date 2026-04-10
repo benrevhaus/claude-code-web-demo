@@ -116,7 +116,17 @@ These scripts include the explicit deployment region in every AWS CLI call.
 - The cursor persistence bug was the most consequential failure — it would have caused every scheduled run to re-process the entire corpus from the beginning, consuming API quota and Lambda execution time without ingesting new data. It was caught by checking the database count after the second run.
 - None of the six failures were caught by the test suite. All were environmental: wrong region, wrong header, wrong endpoint behavior, wrong checkpoint semantics under production pagination limits. This validates ADR-036's observation that the test suite validates code correctness, not deployment correctness.
 
+## Business Impact
+
+The Yotpo data stream serves a dual purpose: technical data sovereignty and vendor negotiating leverage.
+
+The company is planning to exit Yotpo. The generalized publication layer (ADR-033) was built in phase 1 specifically so that downstream systems (Customer 360, analytics, storefront) bind to a provider-agnostic contract, not to Yotpo-native tables. When the replacement vendor arrives, the switch happens at the source-canonical layer — downstream systems don't change.
+
+This capability will be used as leverage in the Yotpo exit negotiation, following the same pattern proven with Gorgias (ADR-050): a vendor that knows the customer owns its data independently and can switch providers without downstream disruption offers better exit terms than one that assumes lock-in.
+
+The Yotpo stream's 254K reviews, reconciled and running incrementally, is proof that the migration path exists and works — not a plan, not a slide deck, but a production system with data flowing.
+
 ## Freshness Marker
 
-- **Captured:** 2026-04-07
-- **Stale when:** the platform adds a CI/CD pipeline that automates the build → deploy → verify sequence (making the manual scripts unnecessary), or a future stream deployment encounters a failure category not documented here.
+- **Captured:** 2026-04-07, updated 2026-04-10
+- **Stale when:** the platform adds a CI/CD pipeline that automates the build → deploy → verify sequence (making the manual scripts unnecessary), a future stream deployment encounters a failure category not documented here, or the Yotpo exit is complete and the leverage is no longer relevant.
