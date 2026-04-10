@@ -22,6 +22,25 @@ echo "=== MySQL seed starting ==="
 echo "Batch size: ${BATCH_SIZE}"
 echo "Store ID: ${APP_KEY:0:8}..."
 
+# Disable all EventBridge rules to prevent Lambda lock contention
+echo "=== Disabling EventBridge rules ==="
+RULES=$(aws events list-rules --region "${REGION}" --name-prefix "data-streams-" --query "Rules[].Name" --output text --no-cli-pager)
+for rule in ${RULES}; do
+  aws events disable-rule --region "${REGION}" --name "${rule}" --no-cli-pager 2>/dev/null
+  echo "  Disabled: ${rule}"
+done
+
+# Re-enable rules on exit (success, error, or Ctrl+C)
+cleanup() {
+  echo ""
+  echo "=== Re-enabling EventBridge rules ==="
+  for rule in ${RULES}; do
+    aws events enable-rule --region "${REGION}" --name "${rule}" --no-cli-pager 2>/dev/null
+    echo "  Enabled: ${rule}"
+  done
+}
+trap cleanup EXIT
+
 cd "${DIR}"
 
 .venv/bin/python -c "

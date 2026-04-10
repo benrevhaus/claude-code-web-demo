@@ -17,9 +17,12 @@ class S3Writer:
 
     def _ensure_client(self):
         if self._client is None:
+            import os
+
             import boto3
 
-            self._client = boto3.client("s3")
+            region = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+            self._client = boto3.client("s3", region_name=region)
 
     def build_polling_key(
         self, source: str, stream: str, store_id: str, run_id: str, page_number: int
