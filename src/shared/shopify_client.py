@@ -225,16 +225,8 @@ query FetchProducts($first: Int!, $after: String, $query: String) {
               sku
               barcode
               inventoryQuantity
-              priceV2 {
-                amount
-                currencyCode
-              }
-              compareAtPriceV2 {
-                amount
-                currencyCode
-              }
-              weight
-              weightUnit
+              price
+              compareAtPrice
             }
           }
         }
@@ -478,9 +470,18 @@ class ShopifyGraphQLClient:
         page_info = resource.get("pageInfo", {})
         last_updated_at = edges[-1]["node"].get("updatedAt") if edges else checkpoint
 
+        has_more = bool(page_info.get("hasNextPage"))
         next_cursor = None
-        if page_info.get("hasNextPage") and page_info.get("endCursor"):
+        if has_more and page_info.get("endCursor"):
             next_cursor = encode_cursor_state(checkpoint, page_info["endCursor"])
+
+        # Persist full state so next run resumes from the right page.
+        # Without this, the GraphQL pagination cursor is lost between runs
+        # and each run re-queries from the checkpoint timestamp (ADR-049).
+        if has_more and page_info.get("endCursor"):
+            durable_checkpoint = encode_cursor_state(last_updated_at, page_info["endCursor"])
+        else:
+            durable_checkpoint = last_updated_at
 
         cost = body.get("extensions", {}).get("cost", {})
         throttle = cost.get("throttleStatus", {})
@@ -490,8 +491,8 @@ class ShopifyGraphQLClient:
             status_code=status_code,
             record_count=len(edges),
             next_cursor=next_cursor,
-            checkpoint_cursor=last_updated_at,
-            has_more=bool(page_info.get("hasNextPage")),
+            checkpoint_cursor=durable_checkpoint,
+            has_more=has_more,
             rate_limit_remaining=throttle.get("currentlyAvailable"),
             rate_limit_reset_at=self._build_rate_limit_reset_at(cost),
         )

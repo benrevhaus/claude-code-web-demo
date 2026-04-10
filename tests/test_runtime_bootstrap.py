@@ -85,7 +85,10 @@ def test_shopify_client_fetch_page_parses_orders_response(monkeypatch):
     checkpoint, page_cursor = decode_cursor_state(page.next_cursor)
     assert checkpoint == "2024-03-15T09:00:00Z"
     assert page_cursor == "cursor-2"
-    assert page.checkpoint_cursor == "2024-03-15T10:05:00Z"
+    # checkpoint_cursor encodes full state when has_more=True (ADR-049)
+    cp_checkpoint, cp_page_cursor = decode_cursor_state(page.checkpoint_cursor)
+    assert cp_checkpoint == "2024-03-15T10:05:00Z"
+    assert cp_page_cursor == "cursor-2"
     assert page.rate_limit_remaining == 35
 
 
