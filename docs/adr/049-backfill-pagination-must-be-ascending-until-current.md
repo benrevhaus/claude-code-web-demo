@@ -101,11 +101,40 @@ Rejected because it doubles the API call volume, doubles the complexity of curso
 
 Rejected because it would require a Lambda timeout longer than 15 minutes for large corpora. The page limit exists to keep each run within the Lambda execution window. The fix must work within the existing pagination constraints.
 
+## Why updated_datetime, Not created_datetime
+
+Backfill pagination sorts by `updated_datetime`, not `created_datetime`. This is a deliberate choice that affects how the backfill appears during execution:
+
+### What the operator sees during backfill
+
+The `created_datetime` range in the database will look scattered — a ticket created in 2020 but reopened in 2023 appears early in the ascending sort because its `updated_datetime` is 2023. This is correct behavior, not a bug.
+
+### Why this is the right field
+
+- **Completeness:** sorting by `updated_datetime` ascending guarantees that every record modified since the cursor is fetched. If a 2020 ticket was modified yesterday, sorting by `created_datetime` would never re-fetch it.
+- **Cursor safety:** the cursor represents "everything updated before this point has been fetched." On the next run, the cursor advances and only newer updates are fetched. No record is missed.
+- **Incremental compatibility:** after backfill completes, the same `updated_datetime` field drives incremental mode. Records updated since the last run appear at the top of the descending result set.
+
+### Why not created_datetime
+
+Sorting by `created_datetime` ascending would produce a clean sequential backfill (2020, 2021, 2022...) but would miss records that were modified after their creation date. A ticket created in 2020 and reopened in 2025 would not be re-fetched unless the cursor was reset.
+
+### The rule
+
+Every polling client must sort by the vendor's **last-modified** field (typically `updated_datetime`, `updated_at`, or equivalent), not the creation field. This applies to both backfill (ascending) and incremental (descending) modes.
+
+| Vendor | Sort field | Backfill direction | Incremental direction |
+|--------|-----------|-------------------|----------------------|
+| Gorgias | `updated_datetime` | Ascending | Descending |
+| Yotpo (merchant) | `updated_at` via `since_updated_at` | Ascending | Ascending with filter |
+| Shopify | GraphQL cursor (server-controlled) | Forward | Forward |
+
 ## Assumptions
 
 - The 24-hour threshold works for all current vendors because none generate more than 50,000 records per day
-- The `updated_datetime` field on vendor APIs is reliable and monotonically increasing for new records
-- Ascending pagination returns records in a stable order that doesn't skip records between runs
+- The sort field (`updated_datetime` or equivalent) on vendor APIs is reliable and monotonically increasing for modifications
+- Ascending pagination by update timestamp returns records in a stable order that doesn't skip records between runs
+- The scattered `created_datetime` range during backfill is expected and not a data quality issue
 
 ## Tribal Context
 
