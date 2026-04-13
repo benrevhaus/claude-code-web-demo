@@ -287,6 +287,124 @@ AWS_REGION=us-east-1 AWS_DEFAULT_REGION=us-east-1 .venv/bin/python scripts/test_
 
 Shows reviews created in last 3 days, how many have metadata, and samples of recent metadata with ingestion timestamps. Verifies the metadata Lambda is working for new reviews after the MySQL seed baseline.
 
+### Full platform status check (run this first in any new session)
+
+```bash
+bash scripts/psql-prod.sh -c "
+  SELECT source, stream, last_status, records_total,
+         LEFT(cursor_value, 30) as cursor_preview, last_run_at
+  FROM control.stream_cursors ORDER BY source, stream;
+
+  SELECT 
+    'shopify.orders' as tbl, COUNT(*) as rows FROM shopify.orders
+  UNION ALL SELECT 'shopify.customers', COUNT(*) FROM shopify.customers
+  UNION ALL SELECT 'shopify.products', COUNT(*) FROM shopify.products
+  UNION ALL SELECT 'shopify.inventory', COUNT(*) FROM shopify.inventory_levels
+  UNION ALL SELECT 'shopify.refunds', COUNT(*) FROM shopify.refunds
+  UNION ALL SELECT 'shopify.transactions', COUNT(*) FROM shopify.transactions
+  UNION ALL SELECT 'gorgias.tickets', COUNT(*) FROM gorgias.tickets
+  UNION ALL SELECT 'yotpo.reviews', COUNT(*) FROM yotpo.reviews_raw_current
+  UNION ALL SELECT 'yotpo.metadata', COUNT(*) FROM yotpo.review_metadata_current
+  ORDER BY tbl;"
+```
+
+### Compare Shopify counts against API (with accurate totals)
+
+```bash
+AWS_REGION=us-east-1 AWS_DEFAULT_REGION=us-east-1 .venv/bin/python -c "
+import json, os, sys
+from urllib.request import Request, urlopen
+sys.path.insert(0, '.')
+os.environ['ENV'] = 'prod'
+from src.shared.shopify_client import ShopifyGraphQLClient
+from src.shared.pg_client import PgClient
+client = ShopifyGraphQLClient(stream='orders')
+domain = 'vitality-extracts.myshopify.com'
+access_token = client._get_access_token(domain)
+def cq(r):
+    q = f'query {{ {r}Count(limit: null) {{ count }} }}'
+    req = Request(f'https://{domain}/admin/api/2026-04/graphql.json', data=json.dumps({'query': q}).encode(), headers={'Content-Type': 'application/json', 'X-Shopify-Access-Token': access_token, 'User-Agent': 'data-streams/1.0'}, method='POST')
+    with urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read()).get('data', {}).get(f'{r}Count', {}).get('count', '?')
+pg = PgClient.from_env()
+pg._ensure_connection()
+for name, table in [('Orders', 'shopify.orders'), ('Customers', 'shopify.customers'), ('Products', 'shopify.products')]:
+    with pg.connection.cursor() as cur:
+        cur.execute(f'SELECT COUNT(*) FROM {table}')
+        pg_count = cur.fetchone()[0]
+    api_count = cq(name.lower())
+    diff = pg_count - int(api_count) if isinstance(api_count, int) else '?'
+    print(f'  {name}: API={api_count}  Postgres={pg_count}  Diff={diff}')
+"
+```
+
+### Shopify gap sweep (fill pagination gaps)
+
+```bash
+# Manual invoke — processes one month per call, cursor advances automatically
+aws lambda invoke --region us-east-1 --function-name data-streams-runner-shopify-orders-prod \
+  --cli-binary-format raw-in-base64-out --cli-read-timeout 900 \
+  --payload '{"source":"shopify","stream":"orders","store_id":"YOUR_STORE","mode":"gap_sweep"}' \
+  /tmp/sweep-result.json && cat /tmp/sweep-result.json
+```
+
+Also runs weekly on Sunday 4 AM UTC via EventBridge cron.
+
+### Check data integrity (any table)
+
+```bash
+bash scripts/psql-prod.sh -c "
+  SELECT COUNT(*) as total, COUNT(DISTINCT id) as unique_ids,
+         COUNT(*) - COUNT(DISTINCT id) as duplicates
+  FROM shopify.orders;"
+```
+
+### Check lock contention (when anything appears stuck)
+
+```bash
+bash scripts/psql-prod.sh -c "
+  SELECT pid, state, wait_event_type, wait_event,
+         LEFT(query, 80) as query, NOW() - query_start as duration
+  FROM pg_stat_activity
+  WHERE state != 'idle' AND pid != pg_backend_pid()
+  ORDER BY query_start;"
+```
+
+### Kill stale connections
+
+```bash
+bash scripts/psql-prod.sh -c "
+  SELECT pg_terminate_backend(pid)
+  FROM pg_stat_activity
+  WHERE state = 'idle in transaction'
+    AND query_start < NOW() - INTERVAL '5 minutes';"
+```
+
+### Disable/enable EventBridge rules for maintenance
+
+```bash
+# Disable all
+aws events list-rules --region us-east-1 --name-prefix "data-streams-" --query "Rules[].Name" --output text --no-cli-pager | tr '\t' '\n' | while read rule; do aws events disable-rule --region us-east-1 --name "$rule"; done
+
+# Enable all
+aws events list-rules --region us-east-1 --name-prefix "data-streams-" --query "Rules[].Name" --output text --no-cli-pager | tr '\t' '\n' | while read rule; do aws events enable-rule --region us-east-1 --name "$rule"; done
+```
+
+### Aurora snapshots
+
+```bash
+# Manual snapshot
+aws rds create-db-cluster-snapshot --region us-east-1 \
+  --db-cluster-identifier data-streams-prod \
+  --db-cluster-snapshot-identifier LABEL-HERE
+
+# List snapshots
+aws rds describe-db-cluster-snapshots --region us-east-1 \
+  --db-cluster-identifier data-streams-prod \
+  --query "DBClusterSnapshots[].{ID: DBClusterSnapshotIdentifier, Status: Status, Created: SnapshotCreateTime}" \
+  --output table --no-cli-pager
+```
+
 ### Terraform (infrastructure changes)
 
 ```bash
@@ -335,6 +453,7 @@ If this repository is lost or needs to be recreated:
 - 0.38.0 — Added the analytics contract spec, superseded ADR-030 with ADR-031, and re-framed the dashboard as a read-only internal suite surface inside `data-streams` bound by documented analytical contracts.
 - 0.39.0 — Renamed the in-repo analytical surface to Data Streams Explorer across app copy and core docs, positioning GA4 as the first stream view inside a broader internal suite surface.
 - 0.40.0 — Added a true Data Streams Explorer home view with stream selection, making GA4 a navigable stream module instead of the default root screen.
+- 0.86.0 — ADR-054: Shopify first deployment and pagination gap. Documents all 6 deployment fixes, the 390K order gap from updated_at pagination collisions, and the created_at gap sweep solution. Added comprehensive operational commands to CLAUDE.md: full platform status check, Shopify count comparison, gap sweep, integrity checks, lock contention detection, stale connection cleanup, EventBridge management, Aurora snapshots.
 - 0.85.0 — Shopify gap sweep: mode=gap_sweep iterates month-by-month using created_at to find orders missed by updated_at pagination (~390K gap, ~0.5% per year). Weekly EventBridge cron (Sunday 4 AM). Processes one month per invocation, cursor tracks last completed month. Upsert-on-newer skips existing records. Applies to any Shopify stream, reusable for other brands.
 - 0.84.0 — ADR-053: Yotpo data sovereignty audit. 254K reviews vs Yotpo's ~212K reported. 82K surplus verified clean — MySQL preserved reviews Yotpo purged. Discovered bottom_lines reporting bug (products with 11K+ reviews reported as 0), widget/merchant API inconsistencies, and silent review purging. Four leverage points for vendor negotiation documented.
 - 0.83.0 — ADR-052: sub-stream extraction — when to split nested data into its own table. Rule: extract only when a downstream consumer needs direct queries, not preemptively. Documents current state (refunds/transactions extracted, variants/line_items/images as JSONB), candidates for future extraction with triggers, and why preemptive extraction adds risk during backfill.
