@@ -54,14 +54,30 @@ while true; do
     --payload "{\"source\":\"shopify\",\"stream\":\"orders\",\"store_id\":\"${STORE_ID}\",\"mode\":\"gap_repair\"}" \
     /tmp/repair-result.json --no-cli-pager > /dev/null 2>&1
 
-  RESULT=$(cat /tmp/repair-result.json)
-  MONTH=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('month','?'))" 2>/dev/null || echo "?")
-  STATUS=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "?")
-  NEW=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('records_new',0))" 2>/dev/null || echo "?")
-  SKIPPED=$(echo "${RESULT}" | python3 -c "import sys,json; r=json.load(sys.stdin); print('skip' if r.get('skipped_month') else r.get('records_skipped',0))" 2>/dev/null || echo "?")
-  DURATION=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('duration_seconds',0))" 2>/dev/null || echo "?")
-  PG_MONTH=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('pg_month_count','?'))" 2>/dev/null || echo "?")
-  API_MONTH=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_month_count','?'))" 2>/dev/null || echo "?")
+  RESULT=$(cat /tmp/repair-result.json 2>/dev/null || echo "{}")
+
+  # Check for Lambda timeout or invocation error
+  if echo "${RESULT}" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+    MONTH=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('month','?'))" 2>/dev/null || echo "?")
+    STATUS=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "?")
+    NEW=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('records_new',0))" 2>/dev/null || echo "?")
+    DURATION=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('duration_seconds',0))" 2>/dev/null || echo "?")
+    PG_MONTH=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('pg_month_count','?'))" 2>/dev/null || echo "?")
+    API_MONTH=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_month_count','?'))" 2>/dev/null || echo "?")
+  else
+    # Lambda timed out or returned non-JSON — mid-month cursor was saved, retry
+    echo "Round ${ROUND}: Lambda timeout or error — retrying (mid-month cursor saved)"
+    sleep 5
+    continue
+  fi
+
+  # Check for Lambda function error (timeout returns errorMessage)
+  IS_ERROR=$(echo "${RESULT}" | python3 -c "import sys,json; r=json.load(sys.stdin); print('yes' if 'errorMessage' in r else 'no')" 2>/dev/null || echo "no")
+  if [ "${IS_ERROR}" = "yes" ]; then
+    echo "Round ${ROUND}: Lambda error — retrying (mid-month cursor saved)"
+    sleep 5
+    continue
+  fi
 
   # Get updated Postgres count
   PG_NOW=$(bash scripts/psql-prod.sh -t -c "SELECT COUNT(*) FROM shopify.orders;" | tr -d ' ')
