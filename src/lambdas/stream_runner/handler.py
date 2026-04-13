@@ -565,12 +565,14 @@ def _handle_gap_sweep(event: dict) -> dict:
     pg._ensure_connection()
     with pg.connection.cursor() as cur:
         table = config.pg_table if hasattr(config, 'pg_table') else schema.pg_table
-        # Load ALL existing IDs — no date filter. The repair checks global
-        # existence, not per-month existence. Shopify's created_at filter uses
-        # store timezone (PST); Postgres stores UTC. Monthly boundary comparisons
-        # produce false gaps from timezone differences. Loading all IDs eliminates
-        # this: if the ID exists anywhere in Postgres, skip it.
-        cur.execute(f"SELECT id FROM {table}")
+        # Widen by ±2 days to cover store timezone boundary (Shopify filters in
+        # store TZ, Postgres stores UTC — up to ~8h offset for US Pacific).
+        # This captures all records that Shopify considers part of this month
+        # regardless of how they're stored in UTC.
+        cur.execute(
+            f"SELECT id FROM {table} WHERE created_at >= (%s::date - INTERVAL '2 days') AND created_at < (%s::date + INTERVAL '2 days')",
+            (f"{month_str}-01", f"{next_month}-01"),
+        )
         existing_ids = {row[0] for row in cur.fetchall()}
     log.info("Existing records for month", month=month_str, count=len(existing_ids))
 
