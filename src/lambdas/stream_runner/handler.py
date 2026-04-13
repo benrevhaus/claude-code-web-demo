@@ -585,6 +585,44 @@ def _handle_gap_sweep(event: dict) -> dict:
     api_version = config.api_version if config else "2026-04"
     graphql_url = f"https://{domain}/admin/api/{api_version}/graphql.json"
 
+    # Quick check: if our count matches Shopify's count for this month, skip entirely.
+    # This avoids paginating through months with zero gaps.
+    try:
+        count_query = f'query {{ {root_key}Count(limit: null, query: "{query_filter}") {{ count }} }}'
+        count_req = Request(
+            graphql_url,
+            data=_json.dumps({"query": count_query}).encode("utf-8"),
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "X-Shopify-Access-Token": access_token,
+                "User-Agent": "data-streams/1.0",
+            },
+            method="POST",
+        )
+        with _urlopen(count_req, timeout=30) as resp:
+            count_body = _json.loads(resp.read())
+            api_count = count_body.get("data", {}).get(f"{root_key}Count", {}).get("count")
+
+        if api_count is not None and len(existing_ids) >= api_count:
+            log.info("Month complete — skipping", month=month_str, api_count=api_count, pg_count=len(existing_ids))
+            # Save cursor and return immediately
+            cursor_stream = f"{stream}-repair" if mode == "gap_repair" else f"{stream}-sweep"
+            pg.save_stream_cursor(
+                source=source, stream=cursor_stream, store_id=store_id,
+                cursor_value=month_str, run_id=run_id,
+                status="success", pages=0, records=0,
+            )
+            return {
+                "run_id": run_id, "source": source, "stream": stream,
+                "mode": mode, "month": month_str,
+                "status": "success", "records_new": 0, "records_skipped": len(existing_ids),
+                "api_count": api_count, "skipped_month": True,
+                "duration_seconds": round((datetime.now(timezone.utc) - started_at).total_seconds(), 2),
+            }
+    except Exception:
+        pass  # If count check fails, proceed with full pagination
+
     upsert_fn = getattr(pg, schema.pg_upsert_method)
     history_fn = getattr(pg, schema.pg_history_method)
 
