@@ -553,54 +553,79 @@ def _handle_gap_sweep(event: dict) -> dict:
             "duration_seconds": round((datetime.now(timezone.utc) - started_at).total_seconds(), 2),
         }
 
+    import calendar
     month_str = f"{year:04d}-{month:02d}"
     next_month = f"{year:04d}-{month + 1:02d}" if month < 12 else f"{year + 1:04d}-01"
-    query_filter = f"created_at:>={month_str}-01 AND created_at:<{next_month}-01"
+    last_day = calendar.monthrange(year, month)[1]
+    last_day_str = f"{month_str}-{last_day:02d}"
+
+    # Use <=last_day (not <first_of_next_month) — matches ShopifyQL business truth (ADR-057).
+    query_filter = f"created_at:>={month_str}-01 AND created_at:<={last_day_str}"
 
     log.info("Gap sweep month", month=month_str, query_filter=query_filter)
 
-    # Pre-load existing order IDs for this month to skip S3 writes and upserts
-    # for records we already have. Only truly missing records get the full
-    # S3 write → transform → upsert pipeline.
-    pg._ensure_connection()
-    with pg.connection.cursor() as cur:
-        table = config.pg_table if hasattr(config, 'pg_table') else schema.pg_table
-        # Shopify's created_at filter uses store timezone and is inclusive of
-        # the boundary day. Match that: use AT TIME ZONE for DST-aware conversion,
-        # and include the next day to match Shopify's inclusive < behavior.
-        # This correctly handles PST/PDT transitions without hardcoded offsets.
-        cur.execute(
-            f"""SELECT id FROM {table}
-                WHERE created_at >= (%s::timestamp AT TIME ZONE 'America/Los_Angeles')
-                AND created_at < ((%s::timestamp + INTERVAL '1 day') AT TIME ZONE 'America/Los_Angeles')""",
-            (f"{month_str}-01", f"{next_month}-01"),
-        )
-        existing_ids = {row[0] for row in cur.fetchall()}
-    log.info("Existing records for month", month=month_str, count=len(existing_ids))
-
     # Self-contained GraphQL pagination — does NOT use client.fetch_page()
-    # because that method applies updated_at filters and loses the month filter.
     from src.shared.shopify_client import STREAM_QUERIES
     import json as _json
     from urllib.request import Request, urlopen as _urlopen
     from urllib.error import HTTPError as _HTTPError
 
     query_text_original, root_key = STREAM_QUERIES[stream]
-    # Replace sortKey: UPDATED_AT with ID for the repair.
-    # Sorting by UPDATED_AT or CREATED_AT causes page-boundary collisions when
-    # multiple records share the same timestamp. Sorting by ID is collision-free
-    # because IDs are unique. This guarantees 100% record coverage.
     query_text = query_text_original.replace("sortKey: UPDATED_AT", "sortKey: ID")
     domain = store_id if "." in store_id else f"{store_id}.myshopify.com"
     access_token = client._get_access_token(domain)
     api_version = config.api_version if config else "2026-04"
     graphql_url = f"https://{domain}/admin/api/{api_version}/graphql.json"
 
-    # No count-based skip — timezone differences between Shopify (store TZ) and
-    # Postgres (UTC) make monthly count comparisons unreliable. Instead, the
-    # per-record ID check (existing_ids loaded globally above) handles skipping.
-    # Months with zero missing records paginate through the API but skip every
-    # record in-memory — fast because no S3 writes or Postgres operations.
+    # Pre-load existing IDs (store timezone, DST-aware)
+    pg._ensure_connection()
+    with pg.connection.cursor() as cur:
+        table = config.pg_table if hasattr(config, 'pg_table') else schema.pg_table
+        cur.execute(
+            f"""SELECT id FROM {table}
+                WHERE created_at >= (%s::timestamp AT TIME ZONE 'America/Los_Angeles')
+                AND created_at < ((%s::timestamp + INTERVAL '1 day') AT TIME ZONE 'America/Los_Angeles')""",
+            (f"{month_str}-01", last_day_str),
+        )
+        existing_ids = {row[0] for row in cur.fetchall()}
+    log.info("Existing records for month", month=month_str, count=len(existing_ids))
+
+    # Count check: if Postgres matches Shopify API using <=last_day, skip month.
+    # This is the business-correct count (ADR-057).
+    try:
+        count_query = f'query {{ {root_key}Count(limit: null, query: "{query_filter}") {{ count }} }}'
+        count_req = Request(
+            graphql_url,
+            data=_json.dumps({"query": count_query}).encode("utf-8"),
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "X-Shopify-Access-Token": access_token,
+                "User-Agent": "data-streams/1.0",
+            },
+            method="POST",
+        )
+        with _urlopen(count_req, timeout=30) as resp:
+            count_body = _json.loads(resp.read())
+            api_count = count_body.get("data", {}).get(f"{root_key}Count", {}).get("count")
+
+        if api_count is not None and len(existing_ids) >= api_count:
+            log.info("Month complete — skipping", month=month_str, api_count=api_count, pg_count=len(existing_ids))
+            cursor_stream = f"{stream}-repair" if mode == "gap_repair" else f"{stream}-sweep"
+            pg.save_stream_cursor(
+                source=source, stream=cursor_stream, store_id=store_id,
+                cursor_value=month_str, run_id=run_id,
+                status="success", pages=0, records=0,
+            )
+            return {
+                "run_id": run_id, "source": source, "stream": stream,
+                "mode": mode, "month": month_str,
+                "status": "success", "records_new": 0, "records_skipped": len(existing_ids),
+                "api_count": api_count, "skipped_month": True,
+                "duration_seconds": round((datetime.now(timezone.utc) - started_at).total_seconds(), 2),
+            }
+    except Exception:
+        pass  # If count check fails, proceed with full pagination
 
     upsert_fn = getattr(pg, schema.pg_upsert_method)
     history_fn = getattr(pg, schema.pg_history_method)
