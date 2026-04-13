@@ -565,12 +565,14 @@ def _handle_gap_sweep(event: dict) -> dict:
     pg._ensure_connection()
     with pg.connection.cursor() as cur:
         table = config.pg_table if hasattr(config, 'pg_table') else schema.pg_table
-        # Widen by ±2 days to cover store timezone boundary (Shopify filters in
-        # store TZ, Postgres stores UTC — up to ~8h offset for US Pacific).
-        # This captures all records that Shopify considers part of this month
-        # regardless of how they're stored in UTC.
+        # Shopify's created_at filter uses store timezone and is inclusive of
+        # the boundary day. Match that: use AT TIME ZONE for DST-aware conversion,
+        # and include the next day to match Shopify's inclusive < behavior.
+        # This correctly handles PST/PDT transitions without hardcoded offsets.
         cur.execute(
-            f"SELECT id FROM {table} WHERE created_at >= (%s::date - INTERVAL '2 days') AND created_at < (%s::date + INTERVAL '2 days')",
+            f"""SELECT id FROM {table}
+                WHERE created_at >= (%s::timestamp AT TIME ZONE 'America/Los_Angeles')
+                AND created_at < ((%s::timestamp + INTERVAL '1 day') AT TIME ZONE 'America/Los_Angeles')""",
             (f"{month_str}-01", f"{next_month}-01"),
         )
         existing_ids = {row[0] for row in cur.fetchall()}
