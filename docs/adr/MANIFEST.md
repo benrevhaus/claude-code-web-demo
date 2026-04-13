@@ -94,3 +94,14 @@
 | 048 | Why ADRs Are the Product, Not the Code | Accepted | methodology | Deciding whether documentation overhead is worth it | 036, 040, 047 | — |
 | 049 | Backfill Pagination Must Be Ascending Until Current | Accepted | vendor-pagination | Implementing or debugging polling/backfill cursors | 018, 039, 045 | — |
 | 050 | Gorgias First Deployment Lessons | Accepted | deployment-lessons, vendor-leverage | Launching new vendor streams or framing business impact from technical sovereignty | 018, 039, 045, 046, 049 | — |
+
+## Shopify Deployment And Data Completeness
+
+| # | Title | Status | Domain | Use When | Depends On | Supersedes |
+|---|-------|--------|--------|----------|------------|------------|
+| 051 | Shopify Staged Rollout — Backfill Before Webhooks | Accepted | deployment, risk | Deciding when to add webhooks to a polling stream | 039, 043, 044, 050 | — |
+| 052 | Sub-Stream Extraction — When to Split Nested Data | Accepted | data-modeling | Deciding whether to extract nested data into its own table | 003, 033 | — |
+| 053 | Yotpo Data Sovereignty Audit | Accepted | vendor-audit, leverage | Comparing corpus completeness against vendor API or negotiating with vendor | 033, 040, 041, 042 | — |
+| 054 | Shopify First Deployment and Pagination Gap | Accepted | deployment-lessons | Deploying Shopify streams or debugging Shopify-specific issues | 049, 051 | — |
+| 055 | Shopify Backfill Filter Bug and Gap Repair | Accepted | pagination, correctness | Debugging missing records after backfill, building repair scripts | 049, 054 | — |
+| 056 | AI Blind Spots in Data Pipeline Engineering | Accepted | methodology, quality | Starting any new session, verifying backfill completeness, reviewing AI output | 036, 048, 055 | — |
