@@ -565,8 +565,12 @@ def _handle_gap_sweep(event: dict) -> dict:
     pg._ensure_connection()
     with pg.connection.cursor() as cur:
         table = config.pg_table if hasattr(config, 'pg_table') else schema.pg_table
+        # Widen by 1 day on each side to handle timezone differences between
+        # Shopify's store-timezone created_at filter and our UTC timestamps.
+        # Shopify filters by store timezone; Postgres stores UTC. An order at
+        # 2016-06-01T01:00Z (UTC) is "May 31" in US timezones.
         cur.execute(
-            f"SELECT id FROM {table} WHERE created_at >= %s AND created_at < %s",
+            f"SELECT id FROM {table} WHERE created_at >= (%s::date - INTERVAL '1 day') AND created_at < (%s::date + INTERVAL '1 day')",
             (f"{month_str}-01", f"{next_month}-01"),
         )
         existing_ids = {row[0] for row in cur.fetchall()}
