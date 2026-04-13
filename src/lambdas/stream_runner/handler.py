@@ -579,7 +579,12 @@ def _handle_gap_sweep(event: dict) -> dict:
     from urllib.request import Request, urlopen as _urlopen
     from urllib.error import HTTPError as _HTTPError
 
-    query_text, root_key = STREAM_QUERIES[stream]
+    query_text_original, root_key = STREAM_QUERIES[stream]
+    # Replace sortKey: UPDATED_AT with CREATED_AT for the repair.
+    # Sorting by UPDATED_AT causes page-boundary collisions that skip records
+    # with identical updated_at timestamps. Sorting by CREATED_AT is stable
+    # because created_at is immutable and unique per order.
+    query_text = query_text_original.replace("sortKey: UPDATED_AT", "sortKey: CREATED_AT")
     domain = store_id if "." in store_id else f"{store_id}.myshopify.com"
     access_token = client._get_access_token(domain)
     api_version = config.api_version if config else "2026-04"
@@ -680,7 +685,9 @@ def _handle_gap_sweep(event: dict) -> dict:
             log.error("Page parse failed", error=str(e), page=page_number)
             break
 
-        # Filter to only records we don't already have
+        # Filter to only records we don't already have.
+        # The repair is INSERT-ONLY — never updates existing records.
+        # The regular incremental stream handles updates via upsert-on-newer.
         new_records = [r for r in records if getattr(r, "id", None) not in existing_ids]
         skipped += len(records) - len(new_records)
 
@@ -697,9 +704,12 @@ def _handle_gap_sweep(event: dict) -> dict:
                     result = schema.transform(raw_record, store_id)
                     canonical_list = result if schema.transform_returns_list else [result]
                     for canonical in canonical_list:
-                        upsert_fn(canonical, s3_key, schema.version, run_id)
-                        history_fn(canonical, run_id)
-                        processed += 1
+                        updated = upsert_fn(canonical, s3_key, schema.version, run_id)
+                        if updated:
+                            history_fn(canonical, run_id)
+                            processed += 1
+                            # Add to existing set so we don't re-process on next page
+                            existing_ids.add(getattr(canonical, "id", None))
 
                     for sub in schema.sub_streams:
                         nested_items = getattr(raw_record, sub.extract_field, None) or []
