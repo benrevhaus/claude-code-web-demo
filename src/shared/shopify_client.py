@@ -417,8 +417,17 @@ class ShopifyGraphQLClient:
 
         checkpoint, page_cursor = decode_cursor_state(cursor)
         domain = store_id if "." in store_id else f"{store_id}.myshopify.com"
-        query_filter = f"updated_at:>={checkpoint}" if checkpoint else None
         access_token = self._get_access_token(domain)
+
+        # During backfill (has a page_cursor from mid-pagination), don't filter
+        # by updated_at — just continue from the GraphQL endCursor. The filter
+        # skips all records with updated_at before the checkpoint, creating gaps
+        # for records that were never modified after their creation date.
+        # Only use the filter in incremental mode (checkpoint exists, no page_cursor).
+        if checkpoint and not page_cursor:
+            query_filter = f"updated_at:>={checkpoint}"
+        else:
+            query_filter = None
 
         payload = {
             "query": self._query,

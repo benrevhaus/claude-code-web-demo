@@ -143,6 +143,18 @@ Every polling client must sort by the vendor's **last-modified** field (typicall
 - The Yotpo client avoided this bug by accident: its product-by-product iteration doesn't use time-ordered pagination. But the Yotpo cursor had its own bug (ADR-040) with the same root cause: cursor behavior that works for small datasets but fails at scale.
 - The pattern is: **every cursor and pagination strategy must be tested against a corpus larger than max_pages_per_run.** Small-dataset testing will not catch pagination gaps.
 
+## Rule: Never Filter by Checkpoint During Backfill
+
+A third variant of the pagination gap was discovered in Shopify: the GraphQL query used `updated_at:>=checkpoint` as a filter on every request. During backfill, this filter permanently skips all records with `updated_at` before the checkpoint.
+
+**Example:** First run processes records, saves checkpoint at `2017-06-27`. Second run queries `updated_at:>=2017-06-27` — all orders from 2016 with `updated_at` in 2016 are permanently invisible. They exist in the database but the API filter excludes them.
+
+**The fix:** During backfill (when a page_cursor exists from mid-pagination), use only the GraphQL cursor (`after: endCursor`) for continuation. Do not apply a timestamp filter. The timestamp filter should only activate in incremental mode (checkpoint exists, no page_cursor) to efficiently fetch recent changes.
+
+**The impact on Shopify:** ~390,000 missing orders (5.2% of 7.5M). The earliest months (2016) were most affected — thousands of orders per month that were never modified after creation were skipped entirely. A `gap_repair` mode sweeping by `created_at` month ranges fills these gaps.
+
+**The universal rule:** During backfill, the pagination cursor IS the continuation mechanism. Timestamp filters are for incremental mode only. If a client uses both a cursor and a filter during backfill, the filter will silently exclude records that the cursor would have reached.
+
 ## Debug Rule: Check Vendor Docs Before Assuming API Capabilities
 
 During the Gorgias cursor fix, a date-range filter (`updated_datetime:gte`) was added without checking whether the Gorgias API supported it. The API returned 400 — the parameter doesn't exist. The Gorgias API uses cursor-based pagination only, with no date-range filtering.
