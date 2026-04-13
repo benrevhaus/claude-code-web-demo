@@ -559,6 +559,19 @@ def _handle_gap_sweep(event: dict) -> dict:
 
     log.info("Gap sweep month", month=month_str, query_filter=query_filter)
 
+    # Self-contained GraphQL pagination — does NOT use client.fetch_page()
+    # because that method applies updated_at filters and loses the month filter.
+    from src.shared.shopify_client import STREAM_QUERIES
+    import json as _json
+    from urllib.request import Request, urlopen as _urlopen
+    from urllib.error import HTTPError as _HTTPError
+
+    query_text, root_key = STREAM_QUERIES[stream]
+    domain = store_id if "." in store_id else f"{store_id}.myshopify.com"
+    access_token = client._get_access_token(domain)
+    api_version = config.api_version if config else "2026-04"
+    graphql_url = f"https://{domain}/admin/api/{api_version}/graphql.json"
+
     upsert_fn = getattr(pg, schema.pg_upsert_method)
     history_fn = getattr(pg, schema.pg_history_method)
 
@@ -568,131 +581,59 @@ def _handle_gap_sweep(event: dict) -> dict:
     errors: list[str] = []
     page_cursor = None
     page_number = 0
-    max_pages = config.max_pages_per_run if config else 500
 
-    for page_number in range(1, max_pages + 1):
-        from src.shared.shopify_client import encode_cursor_state as shopify_encode
-        cursor_for_fetch = shopify_encode(None, page_cursor) if page_cursor else query_filter
-
-        response = client.fetch_page(
-            store_id=store_id,
-            endpoint=config.endpoint or config.stream if config else stream,
-            api_version=config.api_version if config else "2026-04",
-            cursor=cursor_for_fetch if page_cursor else None,
-            page_size=config.page_size if config else 50,
+    while True:
+        page_number += 1
+        payload = {
+            "query": query_text,
+            "variables": {"first": 250, "after": page_cursor, "query": query_filter},
+        }
+        request = Request(
+            graphql_url,
+            data=_json.dumps(payload).encode("utf-8"),
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "X-Shopify-Access-Token": access_token,
+                "User-Agent": "data-streams/1.0",
+            },
+            method="POST",
         )
 
-        # Override the query filter for the first page
-        if page_number == 1 and not page_cursor:
-            from src.shared.shopify_client import ShopifyGraphQLClient, STREAM_QUERIES
-            domain = store_id if "." in store_id else f"{store_id}.myshopify.com"
-            access_token = client._get_access_token(domain)
-            query_text, root_key = STREAM_QUERIES[stream]
-            import json as _json
-            from urllib.request import Request, urlopen as _urlopen
-
-            payload = {
-                "query": query_text,
-                "variables": {"first": config.page_size if config else 50, "after": None, "query": query_filter},
-            }
-            request = Request(
-                f"https://{domain}/admin/api/{config.api_version if config else '2026-04'}/graphql.json",
-                data=_json.dumps(payload).encode("utf-8"),
-                headers={
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "X-Shopify-Access-Token": access_token,
-                    "User-Agent": "data-streams/1.0",
-                },
-                method="POST",
-            )
-            with _urlopen(request, timeout=30) as resp:
+        try:
+            with _urlopen(request, timeout=60) as resp:
                 body = _json.loads(resp.read())
+        except _HTTPError as exc:
+            if exc.code == 429:
+                time.sleep(2.0)
+                page_number -= 1
+                continue
+            raise
 
-            if body.get("errors"):
-                log.error("Gap sweep GraphQL error", errors=body["errors"])
-                break
+        if body.get("errors"):
+            log.error("Gap sweep GraphQL error", errors=body["errors"])
+            break
 
-            resource = body.get("data", {}).get(root_key, {})
-            edges = resource.get("edges", [])
-            page_info = resource.get("pageInfo", {})
+        resource = body.get("data", {}).get(root_key, {})
+        edges = resource.get("edges", [])
+        page_info = resource.get("pageInfo", {})
 
-            # Process this page manually
-            response = type(response)(
-                body=body,
-                status_code=200,
-                record_count=len(edges),
-                next_cursor=None,
-                checkpoint_cursor=None,
-                has_more=bool(page_info.get("hasNextPage")),
-            )
-            if page_info.get("endCursor"):
-                page_cursor = page_info["endCursor"]
+        if not edges:
+            break
 
-            # Write raw to S3
-            s3_key = s3.build_polling_key(source, stream, store_id, run_id, page_number)
-            s3.write_raw(key=s3_key, payload=body, metadata={
-                "source": source, "stream": stream, "run-id": run_id,
-                "mode": "gap_sweep", "month": month_str,
-            })
-
-            # Parse and upsert
-            try:
-                page_model = schema.raw_page_model(**body)
-                records = getattr(page_model, schema.record_list_field, [])
-            except Exception as e:
-                log.error("Page parse failed", error=str(e))
-                break
-
-            for raw_record in records:
-                try:
-                    result = schema.transform(raw_record, store_id)
-                    canonical_list = result if schema.transform_returns_list else [result]
-                    for canonical in canonical_list:
-                        updated = upsert_fn(canonical, s3_key, schema.version, run_id)
-                        if updated:
-                            history_fn(canonical, run_id)
-                            processed += 1
-                        else:
-                            skipped += 1
-
-                    for sub in schema.sub_streams:
-                        nested_items = getattr(raw_record, sub.extract_field, None) or []
-                        if not isinstance(nested_items, list):
-                            continue
-                        for nested_raw_data in nested_items:
-                            nested_raw = sub.raw_model(**nested_raw_data) if isinstance(nested_raw_data, dict) else nested_raw_data
-                            sub_canonical = sub.transform(nested_raw, store_id, getattr(raw_record, "id", None))
-                            sub_upsert = getattr(pg, sub.pg_upsert_method)
-                            sub_history = getattr(pg, sub.pg_history_method)
-                            sub_upsert(sub_canonical, s3_key, sub.schema_version, run_id)
-
-                    pg.commit()
-                except Exception as e:
-                    failed += 1
-                    errors.append(f"{getattr(raw_record, 'id', '?')}: {e}")
-                    pg.rollback()
-
-            if not response.has_more:
-                break
-            continue
-
-        # For subsequent pages, use normal fetch_page with the page_cursor
-        if response.status_code == 429:
-            time.sleep(2.0)
-            continue
-
+        # Write raw to S3
         s3_key = s3.build_polling_key(source, stream, store_id, run_id, page_number)
-        s3.write_raw(key=s3_key, payload=response.body, metadata={
+        s3.write_raw(key=s3_key, payload=body, metadata={
             "source": source, "stream": stream, "run-id": run_id,
-            "mode": "gap_sweep", "month": month_str,
+            "mode": mode, "month": month_str, "page": str(page_number),
         })
 
+        # Parse and upsert
         try:
-            page_model = schema.raw_page_model(**response.body)
+            page_model = schema.raw_page_model(**body)
             records = getattr(page_model, schema.record_list_field, [])
         except Exception as e:
-            log.error("Page parse failed", error=str(e))
+            log.error("Page parse failed", error=str(e), page=page_number)
             break
 
         for raw_record in records:
@@ -724,16 +665,9 @@ def _handle_gap_sweep(event: dict) -> dict:
                 errors.append(f"{getattr(raw_record, 'id', '?')}: {e}")
                 pg.rollback()
 
-        if not response.has_more:
+        if not page_info.get("hasNextPage"):
             break
-
-        # Get next page cursor from response
-        resource = response.body.get("data", {})
-        for key in resource:
-            pi = resource[key].get("pageInfo", {}) if isinstance(resource[key], dict) else {}
-            if pi.get("endCursor"):
-                page_cursor = pi["endCursor"]
-                break
+        page_cursor = page_info.get("endCursor")
 
     # Save cursor — repair mode tracks progress, sweep mode doesn't need persistence
     cursor_stream = f"{stream}-repair" if mode == "gap_repair" else f"{stream}-sweep"

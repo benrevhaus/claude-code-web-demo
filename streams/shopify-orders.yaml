@@ -22,7 +22,7 @@ cursor_type: datetime
 
 freshness_sla_minutes: 10
 max_pages_per_run: 200
-page_size: 50
+page_size: 250
 rate_limit_bucket: shopify
 
 webhook_topics:

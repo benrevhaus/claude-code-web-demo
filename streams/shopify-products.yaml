@@ -22,7 +22,7 @@ cursor_type: datetime
 
 freshness_sla_minutes: 60
 max_pages_per_run: 100
-page_size: 50
+page_size: 250
 rate_limit_bucket: shopify
 
 owner: platform

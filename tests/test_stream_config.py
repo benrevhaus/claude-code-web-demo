@@ -17,7 +17,7 @@ class TestStreamConfigParsing:
         assert config.idempotency_key == ["order_id", "updated_at"]
         assert config.cursor_field == "updated_at"
         assert config.freshness_sla_minutes == 10
-        assert config.page_size == 50
+        assert config.page_size == 250
         assert config.max_pages_per_run == 200
         assert config.owner == "platform"
         assert "commerce" in config.tags
