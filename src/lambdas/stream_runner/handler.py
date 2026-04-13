@@ -565,15 +565,12 @@ def _handle_gap_sweep(event: dict) -> dict:
     pg._ensure_connection()
     with pg.connection.cursor() as cur:
         table = config.pg_table if hasattr(config, 'pg_table') else schema.pg_table
-        # Query in store timezone (America/Los_Angeles) to match Shopify's
-        # created_at filter, which uses the store's configured timezone.
-        # Postgres stores UTC; Shopify filters in PST/PDT.
-        cur.execute(
-            f"""SELECT id FROM {table}
-                WHERE created_at AT TIME ZONE 'America/Los_Angeles' >= %s::timestamp
-                AND created_at AT TIME ZONE 'America/Los_Angeles' < %s::timestamp""",
-            (f"{month_str}-01", f"{next_month}-01"),
-        )
+        # Load ALL existing IDs — no date filter. The repair checks global
+        # existence, not per-month existence. Shopify's created_at filter uses
+        # store timezone (PST); Postgres stores UTC. Monthly boundary comparisons
+        # produce false gaps from timezone differences. Loading all IDs eliminates
+        # this: if the ID exists anywhere in Postgres, skip it.
+        cur.execute(f"SELECT id FROM {table}")
         existing_ids = {row[0] for row in cur.fetchall()}
     log.info("Existing records for month", month=month_str, count=len(existing_ids))
 
@@ -595,43 +592,11 @@ def _handle_gap_sweep(event: dict) -> dict:
     api_version = config.api_version if config else "2026-04"
     graphql_url = f"https://{domain}/admin/api/{api_version}/graphql.json"
 
-    # Quick check: if our count matches Shopify's count for this month, skip entirely.
-    # This avoids paginating through months with zero gaps.
-    try:
-        count_query = f'query {{ {root_key}Count(limit: null, query: "{query_filter}") {{ count }} }}'
-        count_req = Request(
-            graphql_url,
-            data=_json.dumps({"query": count_query}).encode("utf-8"),
-            headers={
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-                "X-Shopify-Access-Token": access_token,
-                "User-Agent": "data-streams/1.0",
-            },
-            method="POST",
-        )
-        with _urlopen(count_req, timeout=30) as resp:
-            count_body = _json.loads(resp.read())
-            api_count = count_body.get("data", {}).get(f"{root_key}Count", {}).get("count")
-
-        if api_count is not None and len(existing_ids) >= api_count:
-            log.info("Month complete — skipping", month=month_str, api_count=api_count, pg_count=len(existing_ids))
-            # Save cursor and return immediately
-            cursor_stream = f"{stream}-repair" if mode == "gap_repair" else f"{stream}-sweep"
-            pg.save_stream_cursor(
-                source=source, stream=cursor_stream, store_id=store_id,
-                cursor_value=month_str, run_id=run_id,
-                status="success", pages=0, records=0,
-            )
-            return {
-                "run_id": run_id, "source": source, "stream": stream,
-                "mode": mode, "month": month_str,
-                "status": "success", "records_new": 0, "records_skipped": len(existing_ids),
-                "api_count": api_count, "skipped_month": True,
-                "duration_seconds": round((datetime.now(timezone.utc) - started_at).total_seconds(), 2),
-            }
-    except Exception:
-        pass  # If count check fails, proceed with full pagination
+    # No count-based skip — timezone differences between Shopify (store TZ) and
+    # Postgres (UTC) make monthly count comparisons unreliable. Instead, the
+    # per-record ID check (existing_ids loaded globally above) handles skipping.
+    # Months with zero missing records paginate through the API but skip every
+    # record in-memory — fast because no S3 writes or Postgres operations.
 
     upsert_fn = getattr(pg, schema.pg_upsert_method)
     history_fn = getattr(pg, schema.pg_history_method)
