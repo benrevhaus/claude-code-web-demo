@@ -486,11 +486,268 @@ def _handle_mysql_seed(event: dict) -> dict:
     return result
 
 
+def _handle_gap_sweep(event: dict) -> dict:
+    """Sweep for orders missed during updated_at backfill by querying created_at ranges.
+
+    The updated_at ascending backfill can skip records when multiple orders share
+    the same timestamp at a page boundary. This sweep iterates month-by-month using
+    created_at, upserting everything. Existing records are skipped (upsert-on-newer).
+
+    Cursor tracks: "YYYY-MM" of the last completed month.
+    """
+    source = event["source"]
+    stream = event["stream"]
+    store_id = event["store_id"]
+
+    run_id = str(uuid.uuid4())
+    started_at = datetime.now(timezone.utc)
+
+    log.info("Gap sweep starting", run_id=run_id, source=source, stream=stream, store_id=store_id)
+
+    client = _get_provider_client(source, stream)
+    s3 = _get_s3_writer()
+    pg = _get_pg()
+    schema = get_schema(source, stream)
+
+    configs = load_all_stream_configs()
+    config = configs.get(f"{source}#{stream}")
+
+    # Read sweep cursor: "YYYY-MM" of last completed month
+    sweep_cursor = pg.get_stream_cursor(source, f"{stream}-sweep", store_id)
+
+    if sweep_cursor:
+        # Parse "YYYY-MM" and advance to next month
+        year, month = int(sweep_cursor[:4]), int(sweep_cursor[5:7])
+        if month == 12:
+            year += 1
+            month = 1
+        else:
+            month += 1
+    else:
+        # Start from the beginning
+        year, month = 2016, 1
+
+    now = datetime.now(timezone.utc)
+    if year > now.year or (year == now.year and month > now.month):
+        log.info("Gap sweep complete — all months processed")
+        return {
+            "run_id": run_id, "source": source, "stream": stream,
+            "mode": "gap_sweep", "status": "complete",
+            "duration_seconds": round((datetime.now(timezone.utc) - started_at).total_seconds(), 2),
+        }
+
+    month_str = f"{year:04d}-{month:02d}"
+    next_month = f"{year:04d}-{month + 1:02d}" if month < 12 else f"{year + 1:04d}-01"
+    query_filter = f"created_at:>={month_str}-01 AND created_at:<{next_month}-01"
+
+    log.info("Gap sweep month", month=month_str, query_filter=query_filter)
+
+    upsert_fn = getattr(pg, schema.pg_upsert_method)
+    history_fn = getattr(pg, schema.pg_history_method)
+
+    processed = 0
+    skipped = 0
+    failed = 0
+    errors: list[str] = []
+    page_cursor = None
+    page_number = 0
+    max_pages = config.max_pages_per_run if config else 500
+
+    for page_number in range(1, max_pages + 1):
+        from src.shared.shopify_client import encode_cursor_state as shopify_encode
+        cursor_for_fetch = shopify_encode(None, page_cursor) if page_cursor else query_filter
+
+        response = client.fetch_page(
+            store_id=store_id,
+            endpoint=config.endpoint or config.stream if config else stream,
+            api_version=config.api_version if config else "2026-04",
+            cursor=cursor_for_fetch if page_cursor else None,
+            page_size=config.page_size if config else 50,
+        )
+
+        # Override the query filter for the first page
+        if page_number == 1 and not page_cursor:
+            from src.shared.shopify_client import ShopifyGraphQLClient, STREAM_QUERIES
+            domain = store_id if "." in store_id else f"{store_id}.myshopify.com"
+            access_token = client._get_access_token(domain)
+            query_text, root_key = STREAM_QUERIES[stream]
+            import json as _json
+            from urllib.request import Request, urlopen as _urlopen
+
+            payload = {
+                "query": query_text,
+                "variables": {"first": config.page_size if config else 50, "after": None, "query": query_filter},
+            }
+            request = Request(
+                f"https://{domain}/admin/api/{config.api_version if config else '2026-04'}/graphql.json",
+                data=_json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "X-Shopify-Access-Token": access_token,
+                    "User-Agent": "data-streams/1.0",
+                },
+                method="POST",
+            )
+            with _urlopen(request, timeout=30) as resp:
+                body = _json.loads(resp.read())
+
+            if body.get("errors"):
+                log.error("Gap sweep GraphQL error", errors=body["errors"])
+                break
+
+            resource = body.get("data", {}).get(root_key, {})
+            edges = resource.get("edges", [])
+            page_info = resource.get("pageInfo", {})
+
+            # Process this page manually
+            response = type(response)(
+                body=body,
+                status_code=200,
+                record_count=len(edges),
+                next_cursor=None,
+                checkpoint_cursor=None,
+                has_more=bool(page_info.get("hasNextPage")),
+            )
+            if page_info.get("endCursor"):
+                page_cursor = page_info["endCursor"]
+
+            # Write raw to S3
+            s3_key = s3.build_polling_key(source, stream, store_id, run_id, page_number)
+            s3.write_raw(key=s3_key, payload=body, metadata={
+                "source": source, "stream": stream, "run-id": run_id,
+                "mode": "gap_sweep", "month": month_str,
+            })
+
+            # Parse and upsert
+            try:
+                page_model = schema.raw_page_model(**body)
+                records = getattr(page_model, schema.record_list_field, [])
+            except Exception as e:
+                log.error("Page parse failed", error=str(e))
+                break
+
+            for raw_record in records:
+                try:
+                    result = schema.transform(raw_record, store_id)
+                    canonical_list = result if schema.transform_returns_list else [result]
+                    for canonical in canonical_list:
+                        updated = upsert_fn(canonical, s3_key, schema.version, run_id)
+                        if updated:
+                            history_fn(canonical, run_id)
+                            processed += 1
+                        else:
+                            skipped += 1
+
+                    for sub in schema.sub_streams:
+                        nested_items = getattr(raw_record, sub.extract_field, None) or []
+                        if not isinstance(nested_items, list):
+                            continue
+                        for nested_raw_data in nested_items:
+                            nested_raw = sub.raw_model(**nested_raw_data) if isinstance(nested_raw_data, dict) else nested_raw_data
+                            sub_canonical = sub.transform(nested_raw, store_id, getattr(raw_record, "id", None))
+                            sub_upsert = getattr(pg, sub.pg_upsert_method)
+                            sub_history = getattr(pg, sub.pg_history_method)
+                            sub_upsert(sub_canonical, s3_key, sub.schema_version, run_id)
+
+                    pg.commit()
+                except Exception as e:
+                    failed += 1
+                    errors.append(f"{getattr(raw_record, 'id', '?')}: {e}")
+                    pg.rollback()
+
+            if not response.has_more:
+                break
+            continue
+
+        # For subsequent pages, use normal fetch_page with the page_cursor
+        if response.status_code == 429:
+            time.sleep(2.0)
+            continue
+
+        s3_key = s3.build_polling_key(source, stream, store_id, run_id, page_number)
+        s3.write_raw(key=s3_key, payload=response.body, metadata={
+            "source": source, "stream": stream, "run-id": run_id,
+            "mode": "gap_sweep", "month": month_str,
+        })
+
+        try:
+            page_model = schema.raw_page_model(**response.body)
+            records = getattr(page_model, schema.record_list_field, [])
+        except Exception as e:
+            log.error("Page parse failed", error=str(e))
+            break
+
+        for raw_record in records:
+            try:
+                result = schema.transform(raw_record, store_id)
+                canonical_list = result if schema.transform_returns_list else [result]
+                for canonical in canonical_list:
+                    updated = upsert_fn(canonical, s3_key, schema.version, run_id)
+                    if updated:
+                        history_fn(canonical, run_id)
+                        processed += 1
+                    else:
+                        skipped += 1
+
+                for sub in schema.sub_streams:
+                    nested_items = getattr(raw_record, sub.extract_field, None) or []
+                    if not isinstance(nested_items, list):
+                        continue
+                    for nested_raw_data in nested_items:
+                        nested_raw = sub.raw_model(**nested_raw_data) if isinstance(nested_raw_data, dict) else nested_raw_data
+                        sub_canonical = sub.transform(nested_raw, store_id, getattr(raw_record, "id", None))
+                        sub_upsert = getattr(pg, sub.pg_upsert_method)
+                        sub_history = getattr(pg, sub.pg_history_method)
+                        sub_upsert(sub_canonical, s3_key, sub.schema_version, run_id)
+
+                pg.commit()
+            except Exception as e:
+                failed += 1
+                errors.append(f"{getattr(raw_record, 'id', '?')}: {e}")
+                pg.rollback()
+
+        if not response.has_more:
+            break
+
+        # Get next page cursor from response
+        resource = response.body.get("data", {})
+        for key in resource:
+            pi = resource[key].get("pageInfo", {}) if isinstance(resource[key], dict) else {}
+            if pi.get("endCursor"):
+                page_cursor = pi["endCursor"]
+                break
+
+    # Save sweep cursor for this month
+    pg.save_stream_cursor(
+        source=source, stream=f"{stream}-sweep", store_id=store_id,
+        cursor_value=month_str, run_id=run_id,
+        status="success", pages=page_number, records=processed,
+    )
+
+    duration = round((datetime.now(timezone.utc) - started_at).total_seconds(), 2)
+    result = {
+        "run_id": run_id, "source": source, "stream": stream,
+        "mode": "gap_sweep", "month": month_str,
+        "status": "success", "records_new": processed, "records_skipped": skipped,
+        "records_failed": failed, "pages": page_number,
+        "duration_seconds": duration,
+    }
+    if errors:
+        result["errors"] = errors[:10]
+    log.info("Gap sweep month complete", **result)
+    return result
+
+
 def handler(event: dict, context=None) -> dict:
     """Lambda entry point. Event: {source, stream, store_id, mode?}."""
     # MySQL seed mode — backfill from legacy database (ADR-041)
     if event.get("mode") == "mysql_seed":
         return _handle_mysql_seed(event)
+
+    # Gap sweep mode — find orders missed by updated_at pagination
+    if event.get("mode") == "gap_sweep":
+        return _handle_gap_sweep(event)
 
     # Product refresh mode — daily catalog diff + backfill new products
     if event.get("mode") == "product_refresh":

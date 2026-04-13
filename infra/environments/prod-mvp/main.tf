@@ -688,6 +688,37 @@ resource "aws_lambda_permission" "yotpo_review_metadata_eventbridge" {
 }
 
 # -----------------------------------------------------------------------------
+# EventBridge — Shopify orders gap sweep (weekly, Sunday 4 AM UTC)
+# -----------------------------------------------------------------------------
+# Sweeps one month per invocation using created_at ranges to find orders
+# missed by the updated_at backfill pagination. Cursor tracks last month swept.
+
+resource "aws_cloudwatch_event_rule" "shopify_orders_gap_sweep" {
+  name                = "${local.prefix}-shopify-orders-gap-sweep-${local.env}"
+  schedule_expression = "cron(0 4 ? * SUN *)"
+  state               = "ENABLED"
+}
+
+resource "aws_cloudwatch_event_target" "shopify_orders_gap_sweep" {
+  rule = aws_cloudwatch_event_rule.shopify_orders_gap_sweep.name
+  arn  = aws_lambda_function.shopify_orders.arn
+  input = jsonencode({
+    source   = "shopify"
+    stream   = "orders"
+    store_id = var.shopify_store_id
+    mode     = "gap_sweep"
+  })
+}
+
+resource "aws_lambda_permission" "shopify_orders_gap_sweep_eventbridge" {
+  statement_id  = "AllowEventBridgeGapSweep"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.shopify_orders.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.shopify_orders_gap_sweep.arn
+}
+
+# -----------------------------------------------------------------------------
 # EventBridge — Yotpo daily product refresh (6 AM UTC)
 # -----------------------------------------------------------------------------
 # Uses the same yotpo-reviews Lambda with mode=product_refresh.
