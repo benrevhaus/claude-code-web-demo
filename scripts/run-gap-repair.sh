@@ -16,7 +16,7 @@ echo "Store: ${STORE_ID}"
 echo ""
 
 # Get total Shopify count (business count using <=last_day)
-SHOPIFY_TOTAL=$(AWS_REGION=${REGION} AWS_DEFAULT_REGION=${REGION} .venv/bin/python -c "
+SHOPIFY_TOTAL=$(AWS_REGION=${REGION} AWS_DEFAULT_REGION=${REGION} .venv/bin/python << 'PYEOF'
 import json, os, sys, calendar
 from urllib.request import Request, urlopen
 from datetime import datetime, timezone
@@ -28,11 +28,13 @@ domain = 'vitality-extracts.myshopify.com'
 token = client._get_access_token(domain)
 now = datetime.now(timezone.utc)
 last_day = calendar.monthrange(now.year, now.month)[1]
-q = f'query {{ ordersCount(limit: null, query: \"created_at:<={now.year}-{now.month:02d}-{last_day:02d}\") {{ count }} }}'
+q = 'query { ordersCount(limit: null, query: "created_at:<=' + f'{now.year}-{now.month:02d}-{last_day:02d}' + '") { count } }'
 req = Request(f'https://{domain}/admin/api/2026-04/graphql.json', data=json.dumps({'query': q}).encode(), headers={'Content-Type': 'application/json', 'X-Shopify-Access-Token': token, 'User-Agent': 'data-streams/1.0'}, method='POST')
 with urlopen(req, timeout=30) as resp:
-    print(json.loads(resp.read()).get('data', {}).get('ordersCount', {}).get('count', '?'))
-")
+    body = json.loads(resp.read())
+    print(body.get('data', {}).get('ordersCount', {}).get('count', '?'))
+PYEOF
+)
 
 PG_TOTAL=$(bash scripts/psql-prod.sh -t -c "SELECT COUNT(*) FROM shopify.orders;" | tr -d ' ')
 
