@@ -559,6 +559,19 @@ def _handle_gap_sweep(event: dict) -> dict:
 
     log.info("Gap sweep month", month=month_str, query_filter=query_filter)
 
+    # Pre-load existing order IDs for this month to skip S3 writes and upserts
+    # for records we already have. Only truly missing records get the full
+    # S3 write → transform → upsert pipeline.
+    pg._ensure_connection()
+    with pg.connection.cursor() as cur:
+        table = config.pg_table if hasattr(config, 'pg_table') else schema.pg_table
+        cur.execute(
+            f"SELECT id FROM {table} WHERE created_at >= %s AND created_at < %s",
+            (f"{month_str}-01", f"{next_month}-01"),
+        )
+        existing_ids = {row[0] for row in cur.fetchall()}
+    log.info("Existing records for month", month=month_str, count=len(existing_ids))
+
     # Self-contained GraphQL pagination — does NOT use client.fetch_page()
     # because that method applies updated_at filters and loses the month filter.
     from src.shared.shopify_client import STREAM_QUERIES
@@ -621,14 +634,7 @@ def _handle_gap_sweep(event: dict) -> dict:
         if not edges:
             break
 
-        # Write raw to S3
-        s3_key = s3.build_polling_key(source, stream, store_id, run_id, page_number)
-        s3.write_raw(key=s3_key, payload=body, metadata={
-            "source": source, "stream": stream, "run-id": run_id,
-            "mode": mode, "month": month_str, "page": str(page_number),
-        })
-
-        # Parse and upsert
+        # Parse page
         try:
             page_model = schema.raw_page_model(**body)
             records = getattr(page_model, schema.record_list_field, [])
@@ -636,34 +642,43 @@ def _handle_gap_sweep(event: dict) -> dict:
             log.error("Page parse failed", error=str(e), page=page_number)
             break
 
-        for raw_record in records:
-            try:
-                result = schema.transform(raw_record, store_id)
-                canonical_list = result if schema.transform_returns_list else [result]
-                for canonical in canonical_list:
-                    updated = upsert_fn(canonical, s3_key, schema.version, run_id)
-                    if updated:
+        # Filter to only records we don't already have
+        new_records = [r for r in records if getattr(r, "id", None) not in existing_ids]
+        skipped += len(records) - len(new_records)
+
+        if new_records:
+            # Write raw to S3 only for pages with new records (preserve lineage)
+            s3_key = s3.build_polling_key(source, stream, store_id, run_id, page_number)
+            s3.write_raw(key=s3_key, payload=body, metadata={
+                "source": source, "stream": stream, "run-id": run_id,
+                "mode": mode, "month": month_str, "page": str(page_number),
+            })
+
+            for raw_record in new_records:
+                try:
+                    result = schema.transform(raw_record, store_id)
+                    canonical_list = result if schema.transform_returns_list else [result]
+                    for canonical in canonical_list:
+                        upsert_fn(canonical, s3_key, schema.version, run_id)
                         history_fn(canonical, run_id)
                         processed += 1
-                    else:
-                        skipped += 1
 
-                for sub in schema.sub_streams:
-                    nested_items = getattr(raw_record, sub.extract_field, None) or []
-                    if not isinstance(nested_items, list):
-                        continue
-                    for nested_raw_data in nested_items:
-                        nested_raw = sub.raw_model(**nested_raw_data) if isinstance(nested_raw_data, dict) else nested_raw_data
-                        sub_canonical = sub.transform(nested_raw, store_id, getattr(raw_record, "id", None))
-                        sub_upsert = getattr(pg, sub.pg_upsert_method)
-                        sub_history = getattr(pg, sub.pg_history_method)
-                        sub_upsert(sub_canonical, s3_key, sub.schema_version, run_id)
+                    for sub in schema.sub_streams:
+                        nested_items = getattr(raw_record, sub.extract_field, None) or []
+                        if not isinstance(nested_items, list):
+                            continue
+                        for nested_raw_data in nested_items:
+                            nested_raw = sub.raw_model(**nested_raw_data) if isinstance(nested_raw_data, dict) else nested_raw_data
+                            sub_canonical = sub.transform(nested_raw, store_id, getattr(raw_record, "id", None))
+                            sub_upsert = getattr(pg, sub.pg_upsert_method)
+                            sub_history = getattr(pg, sub.pg_history_method)
+                            sub_upsert(sub_canonical, s3_key, sub.schema_version, run_id)
 
-                pg.commit()
-            except Exception as e:
-                failed += 1
-                errors.append(f"{getattr(raw_record, 'id', '?')}: {e}")
-                pg.rollback()
+                    pg.commit()
+                except Exception as e:
+                    failed += 1
+                    errors.append(f"{getattr(raw_record, 'id', '?')}: {e}")
+                    pg.rollback()
 
         if not page_info.get("hasNextPage"):
             break
