@@ -205,6 +205,17 @@ bash scripts/deploy-lambda.sh
 bash scripts/deploy-lambda.sh data-streams-runner-yotpo-reviews-prod
 ```
 
+After deploying, verify all functions updated successfully:
+
+```bash
+for fn in shopify-orders shopify-customers shopify-products shopify-inventory gorgias-tickets yotpo-reviews yotpo-review-metadata; do
+  STATUS=$(aws lambda get-function-configuration --region us-east-1 --function-name "data-streams-runner-${fn}-prod" --query "LastUpdateStatus" --output text --no-cli-pager)
+  echo "  ${fn}: ${STATUS}"
+done
+```
+
+All should show `Successful`. If any show `InProgress`, wait a few seconds and re-check.
+
 ### Invoke streams manually
 
 ```bash
