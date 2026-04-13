@@ -580,11 +580,11 @@ def _handle_gap_sweep(event: dict) -> dict:
     from urllib.error import HTTPError as _HTTPError
 
     query_text_original, root_key = STREAM_QUERIES[stream]
-    # Replace sortKey: UPDATED_AT with CREATED_AT for the repair.
-    # Sorting by UPDATED_AT causes page-boundary collisions that skip records
-    # with identical updated_at timestamps. Sorting by CREATED_AT is stable
-    # because created_at is immutable and unique per order.
-    query_text = query_text_original.replace("sortKey: UPDATED_AT", "sortKey: CREATED_AT")
+    # Replace sortKey: UPDATED_AT with ID for the repair.
+    # Sorting by UPDATED_AT or CREATED_AT causes page-boundary collisions when
+    # multiple records share the same timestamp. Sorting by ID is collision-free
+    # because IDs are unique. This guarantees 100% record coverage.
+    query_text = query_text_original.replace("sortKey: UPDATED_AT", "sortKey: ID")
     domain = store_id if "." in store_id else f"{store_id}.myshopify.com"
     access_token = client._get_access_token(domain)
     api_version = config.api_version if config else "2026-04"
