@@ -338,17 +338,27 @@ for name, table in [('Orders', 'shopify.orders'), ('Customers', 'shopify.custome
 "
 ```
 
-### Shopify gap sweep (fill pagination gaps)
+### Shopify gap sweep and repair (fill pagination gaps)
 
 ```bash
-# Manual invoke — processes one month per call, cursor advances automatically
+# Recurring sweep (weekly cron or manual) — checks last 2 months only
 aws lambda invoke --region us-east-1 --function-name data-streams-runner-shopify-orders-prod \
   --cli-binary-format raw-in-base64-out --cli-read-timeout 900 \
   --payload '{"source":"shopify","stream":"orders","store_id":"YOUR_STORE","mode":"gap_sweep"}' \
   /tmp/sweep-result.json && cat /tmp/sweep-result.json
+
+# One-time historical repair — walks all months from 2016, invoke repeatedly
+aws lambda invoke --region us-east-1 --function-name data-streams-runner-shopify-orders-prod \
+  --cli-binary-format raw-in-base64-out --cli-read-timeout 900 \
+  --payload '{"source":"shopify","stream":"orders","store_id":"YOUR_STORE","mode":"gap_repair"}' \
+  /tmp/repair-result.json && cat /tmp/repair-result.json
 ```
 
-Also runs weekly on Sunday 4 AM UTC via EventBridge cron.
+Weekly cron (Sunday 4 AM UTC) runs `gap_sweep` — checks only recent months. To repair all history, invoke `gap_repair` repeatedly until it returns `status: complete`, then delete the repair cursor:
+
+```bash
+bash scripts/psql-prod.sh -c "DELETE FROM control.stream_cursors WHERE stream = 'orders-repair';"
+```
 
 ### Check data integrity (any table)
 

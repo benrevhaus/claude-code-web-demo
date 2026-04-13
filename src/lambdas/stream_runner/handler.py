@@ -487,22 +487,26 @@ def _handle_mysql_seed(event: dict) -> dict:
 
 
 def _handle_gap_sweep(event: dict) -> dict:
-    """Sweep for orders missed during updated_at backfill by querying created_at ranges.
+    """Sweep for records missed during updated_at backfill by querying created_at ranges.
 
-    The updated_at ascending backfill can skip records when multiple orders share
-    the same timestamp at a page boundary. This sweep iterates month-by-month using
-    created_at, upserting everything. Existing records are skipped (upsert-on-newer).
+    Two modes:
+      - "gap_sweep" (recurring): sweeps current and previous month only.
+        Catches pagination gaps from recent incremental polling.
+      - "gap_repair" (one-time): walks through all historical months from
+        the beginning. Invoke repeatedly until complete, then delete cursor.
 
     Cursor tracks: "YYYY-MM" of the last completed month.
     """
     source = event["source"]
     stream = event["stream"]
     store_id = event["store_id"]
+    mode = event.get("mode", "gap_sweep")
 
     run_id = str(uuid.uuid4())
     started_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
 
-    log.info("Gap sweep starting", run_id=run_id, source=source, stream=stream, store_id=store_id)
+    log.info("Gap sweep starting", run_id=run_id, source=source, stream=stream, store_id=store_id, mode=mode)
 
     client = _get_provider_client(source, stream)
     s3 = _get_s3_writer()
@@ -512,22 +516,35 @@ def _handle_gap_sweep(event: dict) -> dict:
     configs = load_all_stream_configs()
     config = configs.get(f"{source}#{stream}")
 
-    # Read sweep cursor: "YYYY-MM" of last completed month
-    sweep_cursor = pg.get_stream_cursor(source, f"{stream}-sweep", store_id)
+    if mode == "gap_repair":
+        # One-time historical repair: walk through all months from cursor
+        sweep_cursor = pg.get_stream_cursor(source, f"{stream}-repair", store_id)
 
-    if sweep_cursor:
-        # Parse "YYYY-MM" and advance to next month
-        year, month = int(sweep_cursor[:4]), int(sweep_cursor[5:7])
-        if month == 12:
-            year += 1
-            month = 1
+        if sweep_cursor:
+            year, month = int(sweep_cursor[:4]), int(sweep_cursor[5:7])
+            if month == 12:
+                year += 1
+                month = 1
+            else:
+                month += 1
         else:
-            month += 1
-    else:
-        # Start from the beginning
-        year, month = 2016, 1
+            year, month = 2016, 1
 
-    now = datetime.now(timezone.utc)
+        if year > now.year or (year == now.year and month > now.month):
+            log.info("Gap repair complete — all months processed")
+            return {
+                "run_id": run_id, "source": source, "stream": stream,
+                "mode": mode, "status": "complete",
+                "duration_seconds": round((datetime.now(timezone.utc) - started_at).total_seconds(), 2),
+            }
+    else:
+        # Recurring sweep: previous month and current month
+        # Always check last 2 months regardless of cursor
+        if now.month == 1:
+            year, month = now.year - 1, 12
+        else:
+            year, month = now.year, now.month - 1
+
     if year > now.year or (year == now.year and month > now.month):
         log.info("Gap sweep complete — all months processed")
         return {
@@ -718,9 +735,10 @@ def _handle_gap_sweep(event: dict) -> dict:
                 page_cursor = pi["endCursor"]
                 break
 
-    # Save sweep cursor for this month
+    # Save cursor — repair mode tracks progress, sweep mode doesn't need persistence
+    cursor_stream = f"{stream}-repair" if mode == "gap_repair" else f"{stream}-sweep"
     pg.save_stream_cursor(
-        source=source, stream=f"{stream}-sweep", store_id=store_id,
+        source=source, stream=cursor_stream, store_id=store_id,
         cursor_value=month_str, run_id=run_id,
         status="success", pages=page_number, records=processed,
     )
@@ -728,7 +746,7 @@ def _handle_gap_sweep(event: dict) -> dict:
     duration = round((datetime.now(timezone.utc) - started_at).total_seconds(), 2)
     result = {
         "run_id": run_id, "source": source, "stream": stream,
-        "mode": "gap_sweep", "month": month_str,
+        "mode": mode, "month": month_str,
         "status": "success", "records_new": processed, "records_skipped": skipped,
         "records_failed": failed, "pages": page_number,
         "duration_seconds": duration,
@@ -745,8 +763,8 @@ def handler(event: dict, context=None) -> dict:
     if event.get("mode") == "mysql_seed":
         return _handle_mysql_seed(event)
 
-    # Gap sweep mode — find orders missed by updated_at pagination
-    if event.get("mode") == "gap_sweep":
+    # Gap sweep/repair mode — find records missed by updated_at pagination
+    if event.get("mode") in ("gap_sweep", "gap_repair"):
         return _handle_gap_sweep(event)
 
     # Product refresh mode — daily catalog diff + backfill new products
