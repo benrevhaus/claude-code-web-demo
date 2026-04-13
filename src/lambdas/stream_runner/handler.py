@@ -517,10 +517,17 @@ def _handle_gap_sweep(event: dict) -> dict:
     config = configs.get(f"{source}#{stream}")
 
     if mode == "gap_repair":
-        # One-time historical repair: walk through all months from cursor
+        # One-time historical repair: walk through all months from cursor.
+        # Cursor format: "YYYY-MM" (month complete) or "YYYY-MM|page_cursor" (mid-month resume)
         sweep_cursor = pg.get_stream_cursor(source, f"{stream}-repair", store_id)
+        resume_page_cursor = None
 
-        if sweep_cursor:
+        if sweep_cursor and "|" in sweep_cursor:
+            # Mid-month resume: extract month and page cursor
+            parts = sweep_cursor.split("|", 1)
+            year, month = int(parts[0][:4]), int(parts[0][5:7])
+            resume_page_cursor = parts[1]
+        elif sweep_cursor:
             year, month = int(sweep_cursor[:4]), int(sweep_cursor[5:7])
             if month == 12:
                 year += 1
@@ -636,8 +643,9 @@ def _handle_gap_sweep(event: dict) -> dict:
     skipped = 0
     failed = 0
     errors: list[str] = []
-    page_cursor = None
+    page_cursor = resume_page_cursor if mode == "gap_repair" else None
     page_number = 0
+    cursor_stream = f"{stream}-repair" if mode == "gap_repair" else f"{stream}-sweep"
 
     while True:
         page_number += 1
@@ -733,8 +741,15 @@ def _handle_gap_sweep(event: dict) -> dict:
             break
         page_cursor = page_info.get("endCursor")
 
-    # Save cursor — repair mode tracks progress, sweep mode doesn't need persistence
-    cursor_stream = f"{stream}-repair" if mode == "gap_repair" else f"{stream}-sweep"
+        # Save mid-month progress every 10 pages so a timeout doesn't lose work
+        if page_number % 10 == 0 and page_cursor and mode == "gap_repair":
+            pg.save_stream_cursor(
+                source=source, stream=cursor_stream, store_id=store_id,
+                cursor_value=f"{month_str}|{page_cursor}", run_id=run_id,
+                status="running", pages=page_number, records=processed,
+            )
+
+    # Save cursor — month complete (no page cursor = advance to next month)
     pg.save_stream_cursor(
         source=source, stream=cursor_stream, store_id=store_id,
         cursor_value=month_str, run_id=run_id,
