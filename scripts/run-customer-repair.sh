@@ -60,12 +60,14 @@ while true; do
   NEW=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('records_new',0))" 2>/dev/null || echo "?")
   SKIPPED=$(echo "${RESULT}" | python3 -c "import sys,json; r=json.load(sys.stdin); print('skip' if r.get('skipped_month') else r.get('records_skipped',0))" 2>/dev/null || echo "?")
   DURATION=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('duration_seconds',0))" 2>/dev/null || echo "?")
+  PG_MONTH=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('pg_month_count','?'))" 2>/dev/null || echo "?")
+  API_MONTH=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_month_count','?'))" 2>/dev/null || echo "?")
 
   # Get updated Postgres count
   PG_NOW=$(bash scripts/psql-prod.sh -t -c "SELECT COUNT(*) FROM shopify.customers;" | tr -d ' ')
   GAP=$((SHOPIFY_TOTAL - PG_NOW))
 
-  echo "Round ${ROUND}: month=${MONTH} new=${NEW} skipped=${SKIPPED} duration=${DURATION}s | Postgres=${PG_NOW}/${SHOPIFY_TOTAL} gap=${GAP}"
+  echo "Round ${ROUND}: month=${MONTH} new=${NEW} ${DURATION}s month=${PG_MONTH}/${API_MONTH} | total=${PG_NOW}/${SHOPIFY_TOTAL} gap=${GAP}"
 
   if [ "${STATUS}" = "complete" ]; then
     echo ""

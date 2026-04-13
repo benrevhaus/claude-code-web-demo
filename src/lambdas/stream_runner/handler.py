@@ -592,6 +592,7 @@ def _handle_gap_sweep(event: dict) -> dict:
 
     # Count check: if Postgres matches Shopify API using <=last_day, skip month.
     # This is the business-correct count (ADR-057).
+    api_count = None
     try:
         count_query = f'query {{ {root_key}Count(limit: null, query: "{query_filter}") {{ count }} }}'
         count_req = Request(
@@ -621,7 +622,8 @@ def _handle_gap_sweep(event: dict) -> dict:
                 "run_id": run_id, "source": source, "stream": stream,
                 "mode": mode, "month": month_str,
                 "status": "success", "records_new": 0, "records_skipped": len(existing_ids),
-                "api_count": api_count, "skipped_month": True,
+                "pg_month_count": len(existing_ids), "api_month_count": api_count,
+                "skipped_month": True,
                 "duration_seconds": round((datetime.now(timezone.utc) - started_at).total_seconds(), 2),
             }
     except Exception:
@@ -740,11 +742,22 @@ def _handle_gap_sweep(event: dict) -> dict:
     )
 
     duration = round((datetime.now(timezone.utc) - started_at).total_seconds(), 2)
+    # Get final Postgres count for this month (store timezone)
+    with pg.connection.cursor() as cur:
+        cur.execute(
+            f"""SELECT COUNT(*) FROM {table}
+                WHERE created_at >= (%s::timestamp AT TIME ZONE 'America/Los_Angeles')
+                AND created_at < ((%s::timestamp + INTERVAL '1 day') AT TIME ZONE 'America/Los_Angeles')""",
+            (f"{month_str}-01", last_day_str),
+        )
+        pg_month_count = cur.fetchone()[0]
+
     result = {
         "run_id": run_id, "source": source, "stream": stream,
         "mode": mode, "month": month_str,
         "status": "success", "records_new": processed, "records_skipped": skipped,
         "records_failed": failed, "pages": page_number,
+        "pg_month_count": pg_month_count, "api_month_count": api_count,
         "duration_seconds": duration,
     }
     if errors:
