@@ -52,8 +52,13 @@ Every stream YAML has a `status` field: `draft` → `ready` → `live`.
 3. Set SSM secrets (if new vendor)
 4. `terraform apply`
 5. Smoke test: `aws lambda invoke ...`
-6. Update YAML: `status: live`
-7. Commit
+6. Wait for backfill to complete (cursor switches to incremental — timestamp, no page_cursor)
+7. **Verify counts** using `compare-shopify-month.sh` against Shopify API for key months
+8. **Run gap repair** (`scripts/run-gap-repair.sh` or `run-customer-repair.sh`) — the UPDATED_AT sort causes ~0.5% page-boundary collisions during backfill. The repair sweeps by created_at with sortKey: ID (collision-free) and fills the gaps. See ADR-055/057.
+9. **Verify counts again** — gap should be zero or near-zero (surplus from hard-deleted records is expected)
+10. Take Aurora snapshot
+11. Update YAML: `status: live`
+12. Commit
 
 ## Key patterns
 
